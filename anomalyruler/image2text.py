@@ -76,7 +76,7 @@ def get_description_frame(data_name, data_root_dir):
 
     cog_model = load_checkpoint_and_dispatch(
         cog_model,
-        '../.cache/models--THUDM--cogvlm-chat-hf/snapshots/e29dc3ba206d524bf8efbfc60d80fc4556ab0e3c',
+        args.model_path,
         device_map=device_map,
     )
 
@@ -104,6 +104,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='SHTech', choices=['SHTech', 'avenue', 'ped2', 'UBNormal'])
+    parser.add_argument('--model_path', type=str, default='/data/tjf5667/.cache/models--THUDM--cogvlm-chat-hf/snapshots/e29dc3ba206d524bf8efbfc60d80fc4556ab0e3c')
     parser.add_argument('--root', type=str, default='/data/tjf5667/datasets/')
     args = parser.parse_args()
 

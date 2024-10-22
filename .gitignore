@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+anomalyruler/SHTech/test_frame/*
+anomalyruler/SHTech/test_frame_description/*
