@@ -5,7 +5,6 @@ import re
 from collections import Counter
 import argparse
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
-from openai_api import keyword_extract
 
 def read_file(file_path):
     with open(file_path, 'r') as file:
@@ -20,13 +19,13 @@ def cluster_kmeans(sentences, num_clusters=2):
     kmeans = KMeans(n_clusters=num_clusters, random_state=0).fit(X)
     return kmeans.cluster_centers_, kmeans.labels_
 
-def anomaly_keywords(rule_path = 'rule/rule_SHTech.txt', regenerate_keyword = False):
+def anomaly_keywords(rule_path = 'rule/rule_SHTech.txt'):
     '''
     The below anomaly keywords are extracted once and used for the experiment in the paper,
     you can also extract from your rules with the below function.
     '''
-    if regenerate_keyword == False:
-        anomaly_from_rule = [
+
+    anomaly_from_rule = [
         "trolley",
         "cart",
         "luggage",
@@ -49,9 +48,8 @@ def anomaly_keywords(rule_path = 'rule/rule_SHTech.txt', regenerate_keyword = Fa
         "loitering",
         "climbing",
         "tampering",
-        "lingering"]
-    else:
-        anomaly_from_rule = keyword_extract(rule_path)
+        "lingering"
+    ]
     return anomaly_from_rule
 
 def cluster_keyword(text_lines, anomaly_from_rule):

@@ -1,105 +1,133 @@
 import argparse
+import json
+import numpy as np
+import pandas as pd
 import torch
-from accelerate import init_empty_weights, infer_auto_device_map, load_checkpoint_and_dispatch
 
-from llm import *
-from image2text import cogvlm
-from utils import random_select_data_without_copy
+from PIL import Image
+from transformers import pipeline, AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
+from prompts import derive_normal_activity, derive_normal_objects, derive_abnormal_activities, derive_abnormal_objects
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='SHTech', choices=['SHTech', 'avenue', 'ped2', 'UBNormal'], help='Dataset name')
-    parser.add_argument('--model_path', type=str, default='/data/tjf5667/.cache/models--THUDM--cogvlm-chat-hf/snapshots/e29dc3ba206d524bf8efbfc60d80fc4556ab0e3c')
     parser.add_argument('--root', type=str, default='/data/tjf5667/datasets/', help='Root directory for datasets')
-    parser.add_argument('--b', type=int, default=10, help='Batch number')
-    parser.add_argument('--bs', type=int, default=1, help='Batch size')
+    parser.add_argument('--b', type=int, default=1, help='Batch number')
+    parser.add_argument('--bs', type=int, default=10, help='Batch size')
     parser.add_argument('--activity_amount', type=int, default=10, help='Number of normal activities to derive')
     parser.add_argument('--object_amount', type=int, default=10, help='Number of normal objects to derive')
     return parser.parse_args()
 
-if __name__ == "__main__":
-    args = parse_arguments()
-    # data_name = args.data
-    # dataset_name = {'SHTech':'ShanghaiTech', 'avenue':'CUHK Avenue' , 'ped2': 'UCSD Ped2', 'UBNormal': 'UBNormal'}[args.data]
-
-    # with init_empty_weights():
-    #     cog_model = AutoModelForCausalLM.from_pretrained(
-    #         'THUDM/cogvlm-chat-hf',
-    #         torch_dtype=torch.bfloat16,
-    #         low_cpu_mem_usage=True,
-    #         trust_remote_code=True
-    #     ).eval()
-
-    # device_map = infer_auto_device_map(
-    #     cog_model,
-    #     max_memory={
-    #         0: '12GiB', 1: '12GiB', 2: '12GiB', 3: '12GiB', 4: '12GiB',
-    #         5: '12GiB', 6: '12GiB', 7: '12GiB', 8: '12GiB', 9: '12GiB', 'cpu': '32GiB'
-    #     },
-    #     no_split_module_classes=['CogVLMDecoderLayer', 'TransformerLayer']
-    # )
-
-    # cog_model = load_checkpoint_and_dispatch(
-    #     cog_model,
-    #     args.model_path,
-    #     device_map=device_map,
-    # )
-
-    # batch, batch_size = args.b, args.bs
-    # for i in range(batch):
-    #     selected_image_paths = [
-    #         f"{args.root}{path}" for path in random_select_data_without_copy(
-    #         path=f"{data_name}/train.csv", num=batch_size, label=0
-    #         )
-    #     ]
-
-    # frame_descriptions = cogvlm(model=cog_model, mode='chat', image_paths=selected_image_paths)
-    # print(frame_descriptions)
-
-    # TODO: update method signature for cogvlm
-
-    # Generated frame descriptions using cogvlm
-    frame_descriptions = [
-        'There are four people in the image. Starting from the left, the first person is walking with a backpack, the second person is walking alone, the third person is also walking alone, and the fourth person is walking with another person. Other than people, there are two manhole covers on the ground, some plants, and a trash bin.',
-        'There are three people in the image. One person is walking towards the bridge, another is walking away from the bridge, and the third person is standing on the bridge. Other than people, there are trees, a pathway, a bridge, and some architectural structures in the image.',
-        'There are five people in the image. Starting from the left, the first person appears to be walking with a bag. The second person is also walking, but further away. The third person is standing and seems to be looking down. The fourth person is walking with a bag, and the fifth person is walking with a child. Other than people, there are two manhole covers visible in the image.',
-        'There are three people in the image. One person is walking towards the left, another is walking towards the right, and the third person is walking on the bridge. Other than people, there are trees, a pond, a bridge, and a building in the image.',
-        'There are three people in the image. One person is standing near the trees, another is walking on the path, and the third is closer to the building. Other than people, there are trees, a pathway, lampposts, and a building.',
-        'There are five people in the image. Starting from the left, the first person appears to be walking with a backpack. The second person is also walking, but further to the right. The third person is standing near a tree, possibly looking at it or waiting. The fourth person is walking towards the tree, and the fifth person is walking away from the tree. Other than people, there are trees, pathways, and some grassy areas in the image.',
-        'There are two people in the image. One person is walking on the pathway, and the other person is standing on the edge of the pathway. Other than people, there is a water body, a fence, and a sign in the image.',
-        'There are two people in the image. One person is walking with a backpack, and the other person is walking behind the first. Other than people, there are trees, a fence, a water body, and a bench visible in the image.',
-        'There are four people in the image. Starting from the left, the first person is walking away from the camera, the second person is walking towards the camera, the third person is also walking towards the camera, and the fourth person is walking away from the camera. Other than people, there are posters on the wall, a door, and a sidewalk.',
-        'There are two people in the image. One person is walking towards the left, and the other person is walking towards the right. Other than people, there are trees, lampposts, a fence, and a building.'
+def generate_rules(text_model, prompt):
+    messages = [
+        {"role": "system", "content": "You are a surveillance monitor for urban safety"},
+        {"role": "user", "content": {prompt}},
     ]
 
-    # Load the model
-    tokenizer, model = load_model(model_path="meta-llama/Llama-3.2-3B-Instruct")
+    output = text_model(
+        messages,
+        max_new_tokens=128,
+        pad_token_id=50256
+    )
 
-    # Derive and generate normal activities
-    activity_prompt = derive_normal_activity(frame_descriptions, args.activity_amount)
-    activity_output = generate_output(activity_prompt, tokenizer, model)
-    normal_activities = parse_output(activity_output, args.activity_amount)
+    decoded_output = output[0]["generated_text"][-1]
+    response = decoded_output['content'].split('\n')
+    rules = []
+    for line in response:
+        if line.strip() and line[0].isdigit():
+            if '. ' in line:
+                rules.append(line.split('. ', 1)[1])
+            else:
+                rules.append(line)
+    return rules
 
-    # Derive and generate normal objects
-    object_prompt = derive_normal_objects(frame_descriptions, args.object_amount)
-    object_output = generate_output(object_prompt, tokenizer, model)
-    normal_objects = parse_output(object_output, args.object_amount)
+def generate_frame_descriptions(vlm_model, processor, image_paths):
+    batch_images = [Image.open(p).convert('RGB') for p in image_paths]
+    description = []
+    messages = [
+        {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "How many people are in the image and what is each of them doing? What are in the images other than people? Think step by step."}]}
+     ]
 
-    print(normal_activities, normal_objects)
+    input_text = processor.apply_chat_template(messages, add_generation_prompt=True)
+    for image in batch_images:
+        inputs = processor(
+            image,
+            input_text,
+            add_special_tokens=False,
+            return_tensors="pt"
+        ).to('cuda')
 
-    # Derive and generate abnormal activities if normal activities are found
+        with torch.no_grad():
+            output = vlm_model.generate(**inputs, max_new_tokens=128)
+            decoded_output = processor.decode(output[0])
+            description.append(decoded_output)
+
+    return description
+
+if __name__ == "__main__":
+    args = parse_arguments()
+    batch, batch_size = args.b, args.bs
+    data_name = args.data
+    dataset_name = {'SHTech':'ShanghaiTech', 'avenue':'CUHK Avenue', 'ped2': 'UCSD Ped2', 'UBNormal': 'UBNormal'}[args.data]
+    
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16
+    )
+
+    vlm_model = MllamaForConditionalGeneration.from_pretrained(
+        'meta-llama/Llama-3.2-11B-Vision-Instruct',
+        torch_dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
+        quantization_config=bnb_config,
+        device_map='auto'
+    )
+
+    text_model = pipeline(
+        "text-generation",
+        model="meta-llama/Llama-3.2-3B-Instruct",
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    )
+
+    df = pd.read_csv(f'{data_name}/train.csv')
+    image_file_paths = list(df.loc[df['label'] == 0, 'image_path'].values)
+    random_image_paths = np.random.choice(image_file_paths, batch_size, replace=False)
+    for i in range(batch):
+        selected_image_paths = [f"{args.root}{path}" for path in random_image_paths]
+
+    processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
+    frame_descriptions = generate_frame_descriptions(vlm_model, processor, selected_image_paths)
+
+    prompt = derive_normal_activity(frame_descriptions, args.activity_amount)
+    normal_activities = generate_rules(text_model, prompt)
     if normal_activities:
-        activity_prompt = derive_abnormal_activities(normal_activities, args.activity_amount)
-        activity_output = generate_output(activity_prompt, tokenizer, model)
-        abnormal_activities = parse_output(activity_output, args.activity_amount)
-        print(abnormal_activities)
-
-    # Derive and generate abnormal objects if normal objects are found
+        prompt = derive_abnormal_activities(normal_activities, args.activity_amount)
+        abnormal_activities = generate_rules(text_model, prompt)
+    else:
+        raise ValueError("No normal activities were given.")
+    
+    prompt = derive_normal_objects(frame_descriptions, args.object_amount)
+    normal_objects = generate_rules(text_model, prompt)
     if normal_objects:
-        object_prompt = derive_abnormal_objects(normal_objects, args.object_amount)
-        object_output = generate_output(object_prompt, tokenizer, model)
-        abnormal_objects = parse_output(object_output, args.object_amount)
-        print(abnormal_objects)
+        prompt = derive_abnormal_objects(normal_objects, args.object_amount)
+        abnormal_objects = generate_rules(text_model, prompt)
+    else:
+        raise ValueError("No normal objects were given.")
+
+    output_data = {
+        "normal_activities": normal_activities,
+        "abnormal_activities": abnormal_activities,
+        "normal_objects": normal_objects,
+        "abnormal_objects": abnormal_objects
+    }
+
+    output_file = f"{data_name}_rules.json"
+    with open(output_file, 'w') as f:
+        json.dump(output_data, f, indent=4)
+
+    print(f"Rules saved to {output_file}")
 
 
     

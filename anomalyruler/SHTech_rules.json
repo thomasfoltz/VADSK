@@ -1,0 +1,50 @@
+{
+    "normal_activities": [
+        "Walking",
+        "Standing",
+        "Sitting",
+        "Sitting",
+        "Reading",
+        "Driving",
+        "Biking",
+        "Walking",
+        "Running",
+        "Sleeping"
+    ],
+    "abnormal_activities": [
+        "Fighting",
+        "Looting",
+        "Burglary",
+        "Vandalism",
+        "Robbery",
+        "Assault",
+        "Abandoning",
+        "Loitering",
+        "Larceny",
+        "Panic"
+    ],
+    "normal_objects": [
+        "Road",
+        "Trees",
+        "Grass",
+        "Bench",
+        "Building",
+        "Tree",
+        "Trash can",
+        "Streetlight",
+        "Sign",
+        "Poles"
+    ],
+    "abnormal_objects": [
+        "Car",
+        "Vehicle",
+        "Bike",
+        "Drone",
+        "Billboard",
+        "Billboard",
+        "Billboard",
+        "Crane",
+        "Crane",
+        "Crane"
+    ]
+}
