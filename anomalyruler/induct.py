@@ -68,7 +68,6 @@ if __name__ == "__main__":
     args = parse_arguments()
     batch, batch_size = args.b, args.bs
     data_name = args.data
-    dataset_name = {'SHTech':'ShanghaiTech', 'avenue':'CUHK Avenue', 'ped2': 'UCSD Ped2', 'UBNormal': 'UBNormal'}[args.data]
     
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,

@@ -1,0 +1,46 @@
+{
+    "normal_activities": [
+        "Running",
+        "Walking",
+        "Sitting",
+        "Standing",
+        "Sitting",
+        "Walking",
+        "Sitting",
+        "Running",
+        "Walking",
+        "Standing"
+    ],
+    "abnormal_activities": [
+        "Fighting",
+        "Jumping",
+        "Climbing",
+        "Lying",
+        "Hiding",
+        "Tripping",
+        "Throwing",
+        "Pushing",
+        "Tackling",
+        "Crawling"
+    ],
+    "normal_objects": [
+        "People",
+        "Streetlights",
+        "Grass",
+        "Sidewalk",
+        "Lampposts",
+        "Bushes"
+    ],
+    "abnormal_objects": [
+        "Vehicle",
+        "Trash",
+        "Billboard",
+        "Construction",
+        "Fire",
+        "Explosion",
+        "Abandoned vehicle",
+        "Protesting group",
+        "Emergency vehicle",
+        "Crane"
+    ]
+}
