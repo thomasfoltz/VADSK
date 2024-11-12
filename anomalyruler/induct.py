@@ -6,68 +6,138 @@ import torch
 
 from PIL import Image
 from transformers import pipeline, AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
-from prompts import derive_normal_activity, derive_normal_objects, derive_abnormal_activities, derive_abnormal_objects
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='SHTech', choices=['SHTech', 'avenue', 'ped2', 'UBNormal'], help='Dataset name')
     parser.add_argument('--root', type=str, default='/data/tjf5667/datasets/', help='Root directory for datasets')
-    parser.add_argument('--b', type=int, default=1, help='Batch number')
-    parser.add_argument('--bs', type=int, default=10, help='Batch size')
-    parser.add_argument('--activity_amount', type=int, default=10, help='Number of normal activities to derive')
-    parser.add_argument('--object_amount', type=int, default=10, help='Number of normal objects to derive')
+    parser.add_argument('--batch_size', type=int, default=10)
+    parser.add_argument('--activity_limit', type=int, default=10, help='Maximum amount of activities to derive')
+    parser.add_argument('--object_limit', type=int, default=10, help='Maximum amount of objects to derive')
     return parser.parse_args()
 
-def generate_rules(text_model, prompt):
-    messages = [
-        {"role": "system", "content": "You are a surveillance monitor for urban safety"},
-        {"role": "user", "content": {prompt}},
-    ]
+class Induction:
+    def __init__(self, vlm_model, instruct_model, processor, args):
+        self.vlm_model = vlm_model
+        self.instruct_model = instruct_model
+        self.processor = processor
+        self.args = args
+        self.image_paths = None
+        self.vlm_text_input = None
+        self.vlm_input = []
+        self.frame_descriptions = []
+        self.normal_activities = None
+        self.abnormal_activities = None
+        self.normal_objects = None
+        self.abnormal_objects = None
 
-    output = text_model(
-        messages,
-        max_new_tokens=128,
-        pad_token_id=50256
-    )
+    def select_images(self):
+        df = pd.read_csv(f'{self.args.data}/train.csv')
+        image_file_paths = list(df.loc[df['label'] == 0, 'image_path'].values)
+        random_image_paths = np.random.choice(image_file_paths, self.args.batch_size, replace=False)
+        self.image_paths = [f"{self.args.root}{path}" for path in random_image_paths]
 
-    decoded_output = output[0]["generated_text"][-1]
-    response = decoded_output['content'].split('\n')
-    rules = []
-    for line in response:
-        if line.strip() and line[0].isdigit():
-            if '. ' in line:
-                rules.append(line.split('. ', 1)[1])
-            else:
-                rules.append(line)
-    return rules
+    def process_vlm_text_input(self):
+        messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "How many people are in the image and what is each of them doing? What are in the images other than people? Think step by step."}]}]
+        self.vlm_text_input = self.processor.apply_chat_template(messages, add_generation_prompt=True)
 
-def generate_frame_descriptions(vlm_model, processor, image_paths):
-    batch_images = [Image.open(p).convert('RGB') for p in image_paths]
-    description = []
-    messages = [
-        {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "How many people are in the image and what is each of them doing? What are in the images other than people? Think step by step."}]}
-     ]
+    def process_vlm_input(self):
+        for image_path in self.image_paths:
+            image = Image.open(image_path).convert('RGB')
+            processed_input = self.processor(
+                image,
+                self.vlm_text_input,
+                add_special_tokens=False,
+                return_tensors="pt"
+            ).to('cuda')
+            self.vlm_input.append(processed_input)
 
-    input_text = processor.apply_chat_template(messages, add_generation_prompt=True)
-    for image in batch_images:
-        inputs = processor(
-            image,
-            input_text,
-            add_special_tokens=False,
-            return_tensors="pt"
-        ).to('cuda')
+    def generate_frame_descriptions(self):
+        for input in self.vlm_input:
+            with torch.no_grad():
+                output = self.vlm_model.generate(**input, max_new_tokens=128)
+                decoded_output = self.processor.decode(output[0])
+                self.frame_descriptions.append(decoded_output)
 
-        with torch.no_grad():
-            output = vlm_model.generate(**inputs, max_new_tokens=128)
-            decoded_output = processor.decode(output[0])
-            description.append(decoded_output)
+    def generate_rules(self, prompt):
+        messages = [{"role": "system", "content": "You are a surveillance monitor for urban safety"}, {"role": "user", "content": {prompt}},]
+        output = self.instruct_model(
+            messages, 
+            max_new_tokens=128, 
+            pad_token_id=50256
+        )
 
-    return description
+        rules, unparsed_rules = [], output[0]["generated_text"][-1]
+        for line in unparsed_rules['content'].split('\n'):
+            if line.strip() and line[0].isdigit():
+                if '. ' in line:
+                    rules.append(line.split('. ', 1)[1])
+                else:
+                    rules.append(line)
+        return rules
+    
+    def save_rules(self):
+        output_data = {
+            "normal_activities": self.normal_activities,
+            "abnormal_activities": self.abnormal_activities,
+            "normal_objects": self.normal_objects,
+            "abnormal_objects": self.abnormal_objects
+        }
 
+        output_file = f"{self.args.data}_rules.json"
+        with open(output_file, 'w') as f:
+            json.dump(output_data, f, indent=4)
+
+        print(f"Rules saved to {output_file}")
+
+class Prompts:
+    def __init__(self, frame_descriptions, activity_limit, object_limit):
+            self.frame_descriptions = frame_descriptions
+            self.activity_limit = activity_limit
+            self.object_limit = object_limit
+
+    def normal_activities(self):
+            return f"""Given the frame descriptions {self.frame_descriptions}, please list at most {self.activity_limit} unique human activities from these frame descriptions.
+            List them using short terms, not an entire sentence. Output the information in the following format, with no deviations:
+            Example:
+            1. Walking
+            2. Standing
+            
+            Answer:
+            """
+    
+    def normal_objects(self):
+            return f"""Given the frame descriptions {self.frame_descriptions}, please list at most {self.object_limit} unique environmental objects from these frame descriptions.
+            List them using short terms, not an entire sentence. Output the information in the following format, with no deviations:
+            Example: 
+            1. Pathway
+            2. Building
+            
+            Answer:
+            """
+
+    def abnormal_activities(self, normal_activities):
+            return f"""Given these normal activities {normal_activities}, please list at most {self.activity_limit} potential abnormal human activities from the context of these normal activites.
+            List them using short terms, not an entire sentence. Output the information in the following format, with no deviations:
+            Example:
+            1. Fighting
+            2. Running
+
+            Answer:
+            """
+    
+    def abnormal_objects(self, normal_objects):
+            return f"""Given these normal objects {normal_objects}, please list at most {self.object_limit} potential abnormal environmental objects from the context of these normal objects.
+            List them using short terms, not an entire sentence. Output the information in the following format, with no deviations:
+            Example:
+            1. Car
+            2. Weapon
+            
+            Answer:
+            """
+        
 if __name__ == "__main__":
     args = parse_arguments()
-    batch, batch_size = args.b, args.bs
-    data_name = args.data
     
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -83,50 +153,24 @@ if __name__ == "__main__":
         device_map='auto'
     )
 
-    text_model = pipeline(
+    instruct_model = pipeline(
         "text-generation",
         model="meta-llama/Llama-3.2-3B-Instruct",
         torch_dtype=torch.bfloat16,
         device_map="auto",
     )
 
-    df = pd.read_csv(f'{data_name}/train.csv')
-    image_file_paths = list(df.loc[df['label'] == 0, 'image_path'].values)
-    random_image_paths = np.random.choice(image_file_paths, batch_size, replace=False)
-    for i in range(batch):
-        selected_image_paths = [f"{args.root}{path}" for path in random_image_paths]
-
     processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
-    frame_descriptions = generate_frame_descriptions(vlm_model, processor, selected_image_paths)
 
-    prompt = derive_normal_activity(frame_descriptions, args.activity_amount)
-    normal_activities = generate_rules(text_model, prompt)
-    if normal_activities:
-        prompt = derive_abnormal_activities(normal_activities, args.activity_amount)
-        abnormal_activities = generate_rules(text_model, prompt)
-    else:
-        raise ValueError("No normal activities were given.")
-    
-    prompt = derive_normal_objects(frame_descriptions, args.object_amount)
-    normal_objects = generate_rules(text_model, prompt)
-    if normal_objects:
-        prompt = derive_abnormal_objects(normal_objects, args.object_amount)
-        abnormal_objects = generate_rules(text_model, prompt)
-    else:
-        raise ValueError("No normal objects were given.")
+    inductor = Induction(vlm_model, instruct_model, processor, args)
+    inductor.select_images()
+    inductor.process_vlm_text_input()
+    inductor.process_vlm_input()
+    inductor.generate_frame_descriptions()
 
-    output_data = {
-        "normal_activities": normal_activities,
-        "abnormal_activities": abnormal_activities,
-        "normal_objects": normal_objects,
-        "abnormal_objects": abnormal_objects
-    }
-
-    output_file = f"{data_name}_rules.json"
-    with open(output_file, 'w') as f:
-        json.dump(output_data, f, indent=4)
-
-    print(f"Rules saved to {output_file}")
-
-
-    
+    prompts = Prompts(inductor.frame_descriptions, args.activity_limit, args.object_limit)
+    inductor.normal_activities = inductor.generate_rules(prompts.normal_activities())
+    inductor.abnormal_activities = inductor.generate_rules(prompts.abnormal_activities(inductor.normal_activities)) if inductor.normal_activities else None
+    inductor.normal_objects = inductor.generate_rules(prompts.normal_objects())
+    inductor.abnormal_objects = inductor.generate_rules(prompts.abnormal_objects(inductor.normal_objects)) if inductor.normal_objects else None
+    inductor.save_rules()
