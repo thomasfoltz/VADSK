@@ -22,38 +22,35 @@ class Induction:
         self.instruct_model = instruct_model
         self.processor = processor
         self.args = args
-        self.image_paths = None
+        self.frame_paths = None
         self.vlm_message = None
-        self.vlm_input = []
         self.frame_descriptions = []
         self.normal_activities = None
         self.abnormal_activities = None
         self.normal_objects = None
         self.abnormal_objects = None
 
-    def select_images(self):
+    def select_frames(self):
         df = pd.read_csv(f'{self.args.data}/train.csv')
         image_file_paths = list(df.loc[df['label'] == 0, 'image_path'].values)
-        random_image_paths = np.random.choice(image_file_paths, self.args.batch_size, replace=False)
-        self.image_paths = [f"{self.args.root}{path}" for path in random_image_paths]
+        random_frame_paths = np.random.choice(image_file_paths, self.args.batch_size, replace=False)
+        self.frame_paths = [f"{self.args.root}{path}" for path in random_frame_paths]
 
     def process_vlm_message(self):
         messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "How many people are in the image and what is each of them doing? What are in the images other than people? Think step by step."}]}]
         self.vlm_message = self.processor.apply_chat_template(messages, add_generation_prompt=True)
 
-    def process_vlm_input(self):
-        for image_path in self.image_paths:
-            image = Image.open(image_path).convert('RGB')
-            processed_input = self.processor(
+    def generate_frame_descriptions(self):
+        for frame_path in self.frame_paths:
+            image = Image.open(frame_path).convert('RGB')
+            input = self.processor(
                 image,
                 self.vlm_message,
                 add_special_tokens=False,
                 return_tensors="pt"
             ).to('cuda')
-            self.vlm_input.append(processed_input)
 
-    def generate_frame_descriptions(self):
-        for input in self.vlm_input:
+            print('Generating frame_description for:', frame_path)
             with torch.no_grad():
                 output = self.vlm_model.generate(**input, max_new_tokens=128)
                 decoded_output = self.processor.decode(output[0])
@@ -165,9 +162,8 @@ if __name__ == "__main__":
     processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
 
     inductor = Induction(vlm_model, instruct_model, processor, args)
-    inductor.select_images()
+    inductor.select_frames()
     inductor.process_vlm_message()
-    inductor.process_vlm_input()
     inductor.generate_frame_descriptions()
 
     prompts = Prompts(inductor.frame_descriptions, args.activity_limit, args.object_limit)

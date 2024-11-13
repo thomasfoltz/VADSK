@@ -1,40 +1,34 @@
 {
     "normal_activities": [
-        "Standing",
         "Walking"
     ],
     "abnormal_activities": [
-        "Climbing",
-        "Throwing",
+        "Loitering",
+        "Picking",
+        "Vandalism",
+        "Looting",
+        "Fighting",
         "Breaking",
-        "Assault",
-        "Hiding",
-        "Escaping",
-        "Lurking",
-        "Jumping",
-        "Hacking",
-        "Loitering"
+        "Theft",
+        "Running",
+        "Disturbing"
     ],
     "normal_objects": [
-        "Trees",
-        "Building",
-        "Grass",
-        "Asphalt",
+        "Bag",
         "Road",
-        "Streetlights",
-        "Sidewalk",
-        "Fence"
+        "Backpack",
+        "People"
     ],
     "abnormal_objects": [
-        "Unusual Pedestrian",
-        "Graffiti",
-        "Overgrown Vegetation",
-        "Litter",
-        "Unstable Structure",
-        "Construction Zone",
-        "Abandoned Vehicle",
-        "Abandoned Bike",
-        "Broken Glass",
-        "Abandoned Furniture"
+        "Van",
+        "Billboard",
+        "Ladder",
+        "Crane",
+        "Construction equipment",
+        "Drone",
+        "Helicopter",
+        "Scooter",
+        "Bike",
+        "Stroller"
     ]
 }
