@@ -23,7 +23,7 @@ class Induction:
         self.processor = processor
         self.args = args
         self.image_paths = None
-        self.vlm_text_input = None
+        self.vlm_message = None
         self.vlm_input = []
         self.frame_descriptions = []
         self.normal_activities = None
@@ -37,16 +37,16 @@ class Induction:
         random_image_paths = np.random.choice(image_file_paths, self.args.batch_size, replace=False)
         self.image_paths = [f"{self.args.root}{path}" for path in random_image_paths]
 
-    def process_vlm_text_input(self):
+    def process_vlm_message(self):
         messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "How many people are in the image and what is each of them doing? What are in the images other than people? Think step by step."}]}]
-        self.vlm_text_input = self.processor.apply_chat_template(messages, add_generation_prompt=True)
+        self.vlm_message = self.processor.apply_chat_template(messages, add_generation_prompt=True)
 
     def process_vlm_input(self):
         for image_path in self.image_paths:
             image = Image.open(image_path).convert('RGB')
             processed_input = self.processor(
                 image,
-                self.vlm_text_input,
+                self.vlm_message,
                 add_special_tokens=False,
                 return_tensors="pt"
             ).to('cuda')
@@ -67,13 +67,15 @@ class Induction:
             pad_token_id=50256
         )
 
-        rules, unparsed_rules = [], output[0]["generated_text"][-1]
+        rules_set = set()
+        unparsed_rules = output[0]["generated_text"][-1]
         for line in unparsed_rules['content'].split('\n'):
             if line.strip() and line[0].isdigit():
                 if '. ' in line:
-                    rules.append(line.split('. ', 1)[1])
-                else:
-                    rules.append(line)
+                    rule = line.split('. ', 1)[1]
+                    rules_set.add(rule)
+
+        rules = list(rules_set)
         return rules
     
     def save_rules(self):
@@ -154,7 +156,7 @@ if __name__ == "__main__":
     )
 
     instruct_model = pipeline(
-        "text-generation",
+        task="text-generation",
         model="meta-llama/Llama-3.2-3B-Instruct",
         torch_dtype=torch.bfloat16,
         device_map="auto",
@@ -164,7 +166,7 @@ if __name__ == "__main__":
 
     inductor = Induction(vlm_model, instruct_model, processor, args)
     inductor.select_images()
-    inductor.process_vlm_text_input()
+    inductor.process_vlm_message()
     inductor.process_vlm_input()
     inductor.generate_frame_descriptions()
 
@@ -173,4 +175,5 @@ if __name__ == "__main__":
     inductor.abnormal_activities = inductor.generate_rules(prompts.abnormal_activities(inductor.normal_activities)) if inductor.normal_activities else None
     inductor.normal_objects = inductor.generate_rules(prompts.normal_objects())
     inductor.abnormal_objects = inductor.generate_rules(prompts.abnormal_objects(inductor.normal_objects)) if inductor.normal_objects else None
+
     inductor.save_rules()
