@@ -56,6 +56,17 @@ class Induction:
                 decoded_output = self.processor.decode(output[0])
                 self.frame_descriptions.append(decoded_output)
 
+    def extract_rules(self, unparsed_rules):
+        rules_set = set()
+        for line in unparsed_rules['content'].split('\n'):
+            if line.strip() and line[0].isdigit():
+                if '. ' in line:
+                    rule = line.split('. ', 1)[1]
+                    rules_set.add(rule)
+
+        rules = list(rules_set)
+        return rules
+
     def generate_rules(self, prompt):
         messages = [{"role": "system", "content": "You are a surveillance monitor for urban safety"}, {"role": "user", "content": {prompt}},]
         output = self.instruct_model(
@@ -64,15 +75,8 @@ class Induction:
             pad_token_id=50256
         )
 
-        rules_set = set()
         unparsed_rules = output[0]["generated_text"][-1]
-        for line in unparsed_rules['content'].split('\n'):
-            if line.strip() and line[0].isdigit():
-                if '. ' in line:
-                    rule = line.split('. ', 1)[1]
-                    rules_set.add(rule)
-
-        rules = list(rules_set)
+        rules = self.extract_rules(unparsed_rules)
         return rules
     
     def save_rules(self):
