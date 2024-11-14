@@ -39,7 +39,7 @@ class Deduction:
 
     def extract_frame_description(self, unparsed_frame_description):
         unparsed_frame_description = unparsed_frame_description.split('<|end_header_id|>\n\n')[2]
-        frame_description = unparsed_frame_description.replace('\n', '').replace('<|eot_id|>', '')
+        frame_description = unparsed_frame_description.replace('.', ' ').replace('\n', '').replace('<|eot_id|>', '').lower()
         self.continuous_frame_description.append(frame_description)
 
     def generate_continuous_frame_description(self):
@@ -65,18 +65,15 @@ class Deduction:
         keywords = rules['normal_activities'] + rules['abnormal_activities'] + rules['normal_objects'] + rules['abnormal_objects']
         self.keywords = set(keywords)
 
-    def match_frame_description_to_keywords(self):
-        # TODO: issue where two words connected like this 'bench.The'
-        # TODO: make all keywords and frame descriptions lowercase for matching purposes
-        # TODO: when keywords are matched be able to identify that specific keyword
-        # TODO: parse set length of consecutive frame descriptions together to be pased as a preds_tensor to the DNN
+    def match_frame_description_to_keywords(self, frame_description):
         preds = []
-        breakpoint()
-        words = self.continuous_frame_description[0].split()
-        found_match = bool(words & self.keywords)
-        preds.append(1 if found_match else 0)
-        preds_tensor = torch.tensor(preds, dtype=torch.float32).unsqueeze(1)
-        return preds_tensor
+        for keyword in self.keywords:
+            if keyword in frame_description:
+                preds.append(1)
+            else:
+                preds.append(0)
+        preds = torch.tensor(preds, dtype=torch.float32).unsqueeze(1)
+        return preds
 
     def accuracy_score():
         pass
@@ -110,17 +107,22 @@ if __name__ == "__main__":
     processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
 
     deductor = Deduction(vlm_model, processor, args)
-    # deductor.set_frame_paths()
-    # deductor.process_vlm_message()
-    # deductor.generate_continuous_frame_description()
+    deductor.set_frame_paths()
+    deductor.process_vlm_message()
+    deductor.generate_continuous_frame_description()
 
     output_path = f"{args.clip_name}.json"
 
-    # with open(output_path, 'w') as f:
-    #     json.dump(deductor.continuous_frame_description, f)
+    with open(output_path, 'w') as f:
+        json.dump(deductor.continuous_frame_description, f)
 
     with open(output_path, 'r') as f:
         deductor.continuous_frame_description = json.load(f)
 
     deductor.set_keywords()
-    deductor.match_frame_description_to_keywords()
+    frame_traits = []
+    for frame_description in deductor.continuous_frame_description:
+        preds = deductor.match_frame_description_to_keywords(frame_description)
+        frame_traits.append(preds)
+
+    frame_traits = torch.cat(frame_traits, dim=1)

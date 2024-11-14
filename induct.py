@@ -61,7 +61,7 @@ class Induction:
         for line in unparsed_rules['content'].split('\n'):
             if line.strip() and line[0].isdigit():
                 if '. ' in line:
-                    rule = line.split('. ', 1)[1]
+                    rule = line.split('. ', 1)[1].lower()
                     rules_set.add(rule)
 
         rules = list(rules_set)

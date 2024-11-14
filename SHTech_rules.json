@@ -1,34 +1,47 @@
 {
     "normal_activities": [
-        "Walking"
+        "walking",
+        "hiking",
+        "dancing",
+        "standing",
+        "reading",
+        "sitting",
+        "running",
+        "jumping",
+        "biking",
+        "hugging"
     ],
     "abnormal_activities": [
-        "Loitering",
-        "Picking",
-        "Vandalism",
-        "Looting",
-        "Fighting",
-        "Breaking",
-        "Theft",
-        "Running",
-        "Disturbing"
+        "violent swinging",
+        "loitering",
+        "erratic behavior",
+        "frantic running",
+        "fighting",
+        "unusual gait",
+        "clutching",
+        "stumbling",
+        "uncontrolled movement",
+        "swaying"
     ],
     "normal_objects": [
-        "Bag",
-        "Road",
-        "Backpack",
-        "People"
+        "concrete wall",
+        "grass",
+        "manhole cover",
+        "brick",
+        "trash can",
+        "walking person on the left",
+        "walking person on the right"
     ],
     "abnormal_objects": [
-        "Van",
-        "Billboard",
-        "Ladder",
-        "Crane",
-        "Construction equipment",
-        "Drone",
-        "Helicopter",
-        "Scooter",
-        "Bike",
-        "Stroller"
+        "unusual vehicle",
+        "abandoned object",
+        "broken glass",
+        "car",
+        "fire",
+        "broken bottle",
+        "smoke",
+        "vehicle",
+        "unattended package",
+        "hazardous material"
     ]
 }
