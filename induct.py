@@ -176,4 +176,6 @@ if __name__ == "__main__":
     inductor.normal_objects = inductor.generate_rules(prompts.normal_objects())
     inductor.abnormal_objects = inductor.generate_rules(prompts.abnormal_objects(inductor.normal_objects)) if inductor.normal_objects else None
 
+    # TODO: try making rules one word per line so I can use sets to compare against frame descriptions
+    # TODO: should I use the same strategy for generating normal rules to identify more accurately anomalies using the ground truths?
     inductor.save_rules()
