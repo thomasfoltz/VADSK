@@ -61,10 +61,9 @@ class Deduction:
                 self.extract_frame_description(unparsed_frame_description)
 
     def set_keywords(self):
-        print(self.args.data)
-        with open(f'{self.args.data}_rules.json', 'r') as f:
+        with open(f'{self.args.data}/rules.json', 'r') as f:
             rules = json.load(f)
-        self.keywords = rules['normal_activities'] + rules['abnormal_activities'] + rules['normal_objects'] + rules['abnormal_objects']
+        self.keywords = [None] + rules['normal_activities'] + [None] + rules['abnormal_activities'] + [None] + rules['normal_objects'] + [None] + rules['abnormal_objects']
 
     def continuous_frame_descriptions_to_features(self):
         num_keywords = len(self.keywords)
@@ -73,7 +72,7 @@ class Deduction:
 
         for frame_idx, frame_description in enumerate(self.continuous_frame_description):
             for keyword_idx, keyword in enumerate(self.keywords):
-                if re.search(r'\b' + keyword + r'\b', frame_description):
+                if keyword is not None and re.search(r'\b' + keyword + r'\b', frame_description):
                     self.feature_input[keyword_idx, frame_idx] = 1.0
 
     def show_frame_feature_matches(self, frame_idx):
@@ -112,20 +111,19 @@ if __name__ == "__main__":
     processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
 
     deductor = Deduction(vlm_model, processor, args)
+
     deductor.set_frame_paths()
     deductor.process_vlm_message()
     deductor.generate_continuous_frame_description()
 
-    with open(f"{args.video_name}.json", 'w') as f:
+    with open(f"{args.data}/{args.video_name}.json", 'w') as f:
         json.dump(deductor.continuous_frame_description, f)
 
-    # with open(f"{args.video_name}.json", 'r') as f:
+    # with open(f"{args.data}/{args.video_name}.json", 'r') as f:
     #     deductor.continuous_frame_description = json.load(f)
 
     deductor.set_keywords()
     deductor.continuous_frame_descriptions_to_features()
 
-    for frame_idx in range(deductor.feature_input.shape[1]):
-        deductor.show_frame_feature_matches(frame_idx)
-
-    # TODO: organize file paths for rules and frame descriptions
+    # for frame_idx in range(deductor.feature_input.shape[1]):
+    #     deductor.show_frame_feature_matches(frame_idx)

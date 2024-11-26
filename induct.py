@@ -87,7 +87,7 @@ class Induction:
             "abnormal_objects": self.abnormal_objects
         }
 
-        output_file = f"{self.args.data}_rules.json"
+        output_file = f"{self.args.data}/rules.json"
         with open(output_file, 'w') as f:
             json.dump(output_data, f, indent=4)
 
