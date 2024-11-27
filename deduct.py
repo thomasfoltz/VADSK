@@ -1,11 +1,16 @@
 import argparse
+import csv
 import json
 import pandas as pd
 import torch
 import re
+import torch.nn as nn
+import torch.optim as optim
 
 from PIL import Image
 from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
+from shield_layer import ShieldLayer
+from svadr import SVADR
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -24,7 +29,7 @@ class Deduction:
         self.labels = None
         self.frame_paths = None
         self.vlm_message = None
-        self.video_name = self.args.video_name
+        self.video_name = args.video_name
         self.continuous_frame_description = []
         self.keywords = None
         self.feature_input = []
@@ -68,15 +73,15 @@ class Deduction:
     def continuous_frame_descriptions_to_features(self):
         num_keywords = len(self.keywords)
         num_frames = len(self.continuous_frame_description)
-        self.feature_input = torch.zeros((num_keywords, num_frames), dtype=torch.float32)
+        self.feature_input = torch.zeros((num_frames, num_keywords), dtype=torch.float32)
 
         for frame_idx, frame_description in enumerate(self.continuous_frame_description):
             for keyword_idx, keyword in enumerate(self.keywords):
                 if keyword is not None and re.search(r'\b' + keyword + r'\b', frame_description):
-                    self.feature_input[keyword_idx, frame_idx] = 1.0
+                    self.feature_input[frame_idx, keyword_idx] = 1.0
 
     def show_frame_feature_matches(self, frame_idx):
-        match_idx = torch.where(self.feature_input[:, frame_idx] == 1.0)[0].tolist()
+        match_idx = torch.where(self.feature_input[frame_idx, :] == 1.0)[0].tolist()
         print(f'Frame {frame_idx}: {[self.keywords[idx] for idx in match_idx]}')
 
     def accuracy_score():
@@ -125,5 +130,36 @@ if __name__ == "__main__":
     deductor.set_keywords()
     deductor.continuous_frame_descriptions_to_features()
 
-    # for frame_idx in range(deductor.feature_input.shape[1]):
+    # for frame_idx in range(deductor.feature_input.shape[0]):
     #     deductor.show_frame_feature_matches(frame_idx)
+    
+    feature_num = deductor.feature_input.shape[-1]
+    shield_layer = ShieldLayer('SHTech', feature_num)
+    corrected_feature_input = shield_layer.correct_features(deductor.feature_input.clone())
+    
+    model = SVADR(input_size=feature_num, n=corrected_feature_input.shape[0])
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.01)
+
+    def extract_labels(csv_file_path):
+        labels = []
+        with open(csv_file_path, mode='r') as file:
+            csv_reader = csv.reader(file)
+            next(csv_reader)
+            for row in csv_reader:
+                labels.append(float(row[1]))
+        labels_tensor = torch.tensor(labels, dtype=torch.float32).unsqueeze(0)
+        return labels_tensor
+
+    csv_file_path = f'{args.data}/test_frame/{args.video_name}.csv' # TODO: Training on all videos
+    labels = extract_labels(csv_file_path)
+    
+    num_epochs = 1000
+    for epoch in range(num_epochs):
+        optimizer.zero_grad()
+        outputs = model(corrected_feature_input)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+            
+        print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
