@@ -1,13 +1,13 @@
-# SVADR
-## Structure-based Video Anomaly Detection with Reasoning
+# VADSR
+## Video Anomaly Detection with Structured Rules
 
 ## Authors
 Thomas Foltz, Huijuan Xu
 
 ## Dependencies
-SVADR uses Python 3.10 and PyTorch
+VADSR uses Python 3.10 and PyTorch
 
-``conda create -n svadr python=3.10``
+``conda create -n vadsr python=3.10``
 
 ``pip install -r requirements.txt``
 
