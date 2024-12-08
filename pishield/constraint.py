@@ -1,6 +1,6 @@
 import numpy as np
-from pishield.propositional_requirements.literal import Literal
 
+from pishield.literal import Literal
 
 class Constraint:
     def __init__(self, *args):

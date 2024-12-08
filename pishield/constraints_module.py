@@ -1,9 +1,8 @@
 import torch
 
 from torch import nn
-from pishield.propositional_requirements.literal import Literal
-from pishield.propositional_requirements.profiler import Profiler
-
+from pishield.literal import Literal
+from pishield.profiler import Profiler
 
 class ConstraintsModule(nn.Module):
     profiler = Profiler.shared().branch('cm')

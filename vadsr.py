@@ -3,14 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class VADSR(nn.Module):
-    def __init__(self, input_size, n):
+    def __init__(self, feature_dim, n):
         super(VADSR, self).__init__()
         self.conv1 = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=3, stride=1, padding=1)
         self.conv2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1)
         self.conv3 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1)
         self.conv4 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1)
         self.pool = nn.MaxPool1d(kernel_size=2, stride=2, padding=0)
-        self.fc1 = nn.Linear(256 * (input_size // 16), 512)
+        self.fc1 = nn.Linear(256 * (feature_dim // 16), 512)
         self.fc2 = nn.Linear(512, n)
         self.fc3 = nn.Linear(n, 1)
         

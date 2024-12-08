@@ -1,8 +1,7 @@
 import numpy as np
 
-from pishield.propositional_requirements.constraints_group import ConstraintsGroup, Constraint
-from pishield.propositional_requirements.literal import Literal
-
+from pishield.constraints_group import ConstraintsGroup, Constraint
+from pishield.literal import Literal
 
 def get_max_ranking_atom(atoms_list, ranking):
     ranks = [list(ranking).index(atom) for atom in atoms_list]
@@ -32,7 +31,7 @@ def get_max_ranking_eligible_atom_from_sets_of_rules(R, R_other, literal_ranking
 
 def extend_rules_set(R, max_ranking_body_literal):
     new_rules_R_hat = set([])
-    print("head", R[0].head, "with old rules", len(R))
+    # print("head", R[0].head, "with old rules", len(R))
 
     for r in R:
         literals_in_r = [lit.atom for lit in r.body]
@@ -46,7 +45,7 @@ def extend_rules_set(R, max_ranking_body_literal):
             # so, if r already contains l (pos or neg), then return the old rule:
             new_rules_R_hat.add(r)
 
-    print("head", R[0].head, "with new rules", len(new_rules_R_hat))
+    # print("head", R[0].head, "with new rules", len(new_rules_R_hat))
     return list(new_rules_R_hat)
 
 
@@ -59,7 +58,7 @@ def strong_coherency_constraint_preprocessing(R_atom, literal_ranking):
             R_atom_plus.append(constr)
         else:
             R_atom_minus.append(constr)
-    print(R_atom_minus, R_atom_plus)
+    # print(R_atom_minus, R_atom_plus)
 
     # l = max_lambda over literals in R+ and R-
     max_ranking_body_literal = get_max_ranking_eligible_atom_from_sets_of_rules(R_atom_plus, R_atom_minus,

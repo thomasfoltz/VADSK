@@ -1,7 +1,7 @@
 import numpy as np
-from pishield.propositional_requirements.literal import Literal
-from pishield.propositional_requirements.constraint import Constraint
 
+from pishield.literal import Literal
+from pishield.constraint import Constraint
 
 class Clause:
     def __init__(self, literals):
@@ -34,19 +34,6 @@ class Clause:
         body = [lit.neg() for lit in constraint.body]
         return cls([constraint.head] + body)
 
-    @classmethod
-    def random(cls, num_classes):
-        atoms_count = np.random.randint(low=1, high=num_classes, size=1)
-        atoms = np.random.randint(num_classes, size=atoms_count)
-
-        pos = atoms[np.random.randint(2, size=atoms_count) == 1]
-        literals = [Literal(atom, atom in pos) for atom in atoms]
-        return cls(literals)
-
-    def shift_add_n0(self):
-        n0 = Literal(0, False)
-        return Clause([Literal(lit.atom + 1, lit.positive) for lit in self] + [n0])
-
     def fix_head(self, head):
         if not head in self.literals:
             raise Exception('Head not in clause')
@@ -73,9 +60,6 @@ class Clause:
                 return self.resolution_on(other, lit)
 
         return None
-
-    def always_false(self):
-        return len(self) == 0
 
     def coherent_with(self, preds):
         pos = [lit.atom for lit in self.literals if lit.positive]

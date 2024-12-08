@@ -2,7 +2,6 @@ import torch
 import functools
 import datetime
 
-
 # A stack with abstract operations:
 # - push & pop as usual
 # - update x: set all values v to max(v, x)

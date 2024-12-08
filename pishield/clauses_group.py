@@ -1,14 +1,12 @@
 import numpy as np
-import networkx as nx
-from pishield.propositional_requirements.literal import Literal
-from pishield.propositional_requirements.clause import Clause
-from pishield.propositional_requirements.constraints_group import ConstraintsGroup
-from pishield.propositional_requirements.strong_coherency import strong_coherency_constraint_preprocessing
 
+from pishield.literal import Literal
+from pishield.clause import Clause
+from pishield.constraints_group import ConstraintsGroup
+from pishield.strong_coherency import strong_coherency_constraint_preprocessing
 
 class ClausesGroup:
     def __init__(self, clauses):
-        # ClausesGroup([Clause])
         self.clauses = frozenset(clauses)
         self.clauses_list = clauses
 
@@ -35,29 +33,6 @@ class ClausesGroup:
     def __iter__(self):
         return iter(self.clauses)
 
-    @classmethod
-    def random(cls, max_clauses, num_classes, coherent_with=np.array([]), min_clauses=0):
-        assert min_clauses <= max_clauses
-        clauses = [Clause.random(num_classes) for i in range(max_clauses)]
-
-        if len(coherent_with) > 0:
-            keep = cls(clauses).coherent_with(coherent_with).all(axis=0)
-            clauses = np.array(clauses)[keep].tolist()
-
-        found = len(clauses)
-        if found < min_clauses:
-            other = cls.random(max_clauses - found, num_classes, coherent_with=coherent_with,
-                               min_clauses=min_clauses - found)
-            return cls(clauses) + other
-        else:
-            return cls(clauses)
-
-    def add_detection_label(self, forced=False):
-        n0 = Literal(0, False)
-        clauses = [clause.shift_add_n0() for clause in self]
-        forced = [Clause(f"0 n{x + 1}") for x in self.atoms()] if forced else []
-        return ClausesGroup(clauses + forced)
-
     def compacted(self):
         clauses = list(self.clauses)
         clauses.sort(reverse=True, key=len)
@@ -67,7 +42,6 @@ class ClausesGroup:
             compacted = [c for c in compacted if not clause.is_subset(c)]
             compacted.append(clause)
 
-        # print(f"compacted {len(clauses) - len(compacted)} out of {len(clauses)}")
         return ClausesGroup(compacted)
 
     def resolution(self, atom):
@@ -96,64 +70,11 @@ class ClausesGroup:
 
         return constraints, next_clauses
 
-    def graph(self):
-        G = nx.Graph()
-        G.add_nodes_from(self.atoms(), kind='atom')
-        G.add_nodes_from(self.clauses, kind='clause')
-
-        for clause in self.clauses:
-            for lit in clause:
-                G.add_edge(clause, lit.atom)
-
-        return G
-
-    @staticmethod
-    def centrality_measures():
-        return ['degree', 'eigenvector', 'katz', 'closeness', 'betweenness']
-
-    def centrality(self, centrality):
-        G = self.graph()
-
-        if centrality.startswith('rev-'):
-            centrality = centrality[4:]
-            rev = True
-        else:
-            rev = False
-
-        if centrality == 'degree':
-            result = nx.algorithms.centrality.degree_centrality(G)
-        elif centrality == 'eigenvector':
-            result = nx.algorithms.centrality.eigenvector_centrality_numpy(G)
-        elif centrality == 'katz':
-            result = nx.algorithms.centrality.katz_centrality_numpy(G)
-        elif centrality == 'closeness':
-            result = nx.algorithms.centrality.closeness_centrality(G)
-        elif centrality == 'betweenness':
-            result = nx.algorithms.centrality.betweenness_centrality(G)
-        else:
-            raise Exception(f"Unknown centrality {centrality}")
-
-        # Normalize results
-        if rev:
-            values = np.array([result[node] for node in result])
-            mini, maxi = values.min(), values.max()
-            for node in result: result[node] = maxi - (result[node] - mini)
-
-        return result
-
     def stratify(self, centrality):
         # Centrality guides the inference order
-        if not isinstance(centrality, str):
-            atoms = centrality
-        else:
-            centrality = self.centrality(centrality)
-            atoms = list(self.atoms())
-            atoms.sort(key=lambda x: centrality[x])
-        if centrality is None:  # get atoms in the order they appear in constraints
-            atoms = list(self.atoms())
+        atoms = centrality
 
         # Apply resolution repeatedly
-        atoms = atoms[::-1]
         group = ConstraintsGroup([])
         clauses = self
 

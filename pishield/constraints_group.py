@@ -1,8 +1,7 @@
 import numpy as np
 import networkx as nx
-from pishield.propositional_requirements.constraint import Constraint
-from pishield.propositional_requirements.literal import Literal
 
+from pishield.constraint import Constraint
 
 class ConstraintsGroup:
     def __init__(self, arg):
@@ -88,20 +87,6 @@ class ConstraintsGroup:
                 G.add_edge(x, y)
                 G[x][y]['body'] = lit.positive
                 G[x][y]['head'] = constraint.head.positive
-
-        return G
-
-    def duograph(self):
-        atoms = self.atoms()
-        pos_atoms = [str(Literal(atom, True)) for atom in atoms]
-        neg_atoms = [str(Literal(atom, False)) for atom in atoms]
-
-        G = nx.DiGraph()
-        G.add_nodes_from(pos_atoms + neg_atoms)
-
-        for constraint in self.constraints:
-            for lit in constraint.body:
-                G.add_edge(str(lit), str(constraint.head))
 
         return G
 
