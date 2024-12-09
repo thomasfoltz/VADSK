@@ -4,6 +4,8 @@
 
 Thomas Foltz, Huijuan Xu
 
+![image](https://github.com/user-attachments/assets/0dc6adaa-330c-44d3-bfbc-e1c506b213cb)
+
 ## Overview
 
 This project introduces VADSR, a novel approach for video anomaly detection that leverages structured rules. Inspired by AnomalyRuler and PiShield, VADSR combines rule-based anomaly detection with a propositional requirement layer to effectively identify and explain anomalous events in video data.
