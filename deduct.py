@@ -10,8 +10,10 @@ import torch.optim as optim
 from PIL import Image
 from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
 from pishield.shield_layer import ShieldLayer
-from vadsr import VADSR
+from models import VADSR_CNN as VADSR
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+from sklearn.model_selection import train_test_split
+import random
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -41,8 +43,8 @@ class Deduction:
         self.optimizer = None
 
     def set_frame_paths(self):
-        self.labels = pd.read_csv(f'{self.args.data}/{self.dataset_split}.csv').iloc[:, 1].tolist()
-        self.frame_paths = pd.read_csv(f'{self.args.data}/{self.dataset_split}.csv').iloc[:, 0].tolist()
+        self.labels = pd.read_csv(f'benchmarks/{self.args.data}/{self.dataset_split}.csv').iloc[:, 1].tolist()
+        self.frame_paths = pd.read_csv(f'benchmarks/{self.args.data}/{self.dataset_split}.csv').iloc[:, 0].tolist()
 
     def process_vlm_message(self):
         messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "How many people are in the image and what is each of them doing? What are in the images other than people? Think step by step."}]}]
@@ -70,17 +72,17 @@ class Deduction:
             
             frame_description = self.parse_frame_description(unparsed_frame_description)
 
-            with open(f"{self.args.data}/{self.dataset_split}_descriptions.csv", 'a', newline='') as f:
+            with open(f"benchmarks/{self.args.data}/{self.dataset_split}_descriptions.csv", 'a', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([frame_path, label, frame_description])
 
     def set_keywords(self):
-        with open(f'{self.args.data}/rules.json', 'r') as f:
+        with open(f'benchmarks/{self.args.data}/rules.json', 'r') as f:
             rules = json.load(f)
         self.keywords = [None] + rules['normal_activities'] + [None] + rules['abnormal_activities'] + [None] + rules['normal_objects'] + [None] + rules['abnormal_objects']
 
     def group_frames(self):
-        with open(f'{self.args.data}/{deductor.dataset_split}_descriptions.csv', 'r') as f:
+        with open(f'benchmarks/{self.args.data}/{deductor.dataset_split}_descriptions.csv', 'r') as f:
             df = pd.read_csv(f, header=None, names=['frame_path', 'label', 'description'])
             if args.train:
                 df['video_id'] = df['frame_path'].apply(lambda x: '_'.join(x.split('/')[-1].split('_')[:2]))
@@ -125,7 +127,7 @@ class Deduction:
         return smoothed_data
     
     def construct_rule_statements(self):
-        with open(f'{self.args.data}/rules.json', 'r') as file:
+        with open(f'benchmarks/{self.args.data}/rules.json', 'r') as file:
             rules_dict = json.load(file)
 
         for key, values in rules_dict.items():
@@ -134,14 +136,14 @@ class Deduction:
             self.rules[key].extend(f'y_{self.rule_num + i}' for i in range(len(values)))
             self.rule_num += len(values)
 
-        with open(f'{self.args.data}/propositional_statements.txt', 'w') as file:
+        with open(f'benchmarks/{self.args.data}/propositional_statements.txt', 'w') as file:
             for values in self.rules.values():
                 file.write(' or '.join(values) + '\n')
 
     def init_shield_layer(self, feature_num):
         self.shield_layer = ShieldLayer(
             feature_num,
-            f'{self.args.data}/propositional_statements.txt', 
+            f'benchmarks/{self.args.data}/propositional_statements.txt', 
             ordering=list(range(self.rule_num)), 
         )
 
@@ -175,62 +177,99 @@ if __name__ == "__main__":
     deductor = Deduction(None, None, args)
     deductor.set_keywords()
     deductor.group_frames()
+    deductor.construct_rule_statements()
+    feature_num = len(deductor.keywords)
+    deductor.init_shield_layer(feature_num)
+    num_epochs = 20
+    batch_size = 200
 
-    with open(f'{args.data}/{deductor.dataset_split}_descriptions.csv', 'r') as f:
+    with open(f'benchmarks/{args.data}/{deductor.dataset_split}_descriptions.csv', 'r') as f:
         df = pd.read_csv(f, header=None, names=['frame_path', 'label', 'description'])
         descriptions = df['description'].tolist()
         labels = df['label'].tolist()
-        batch_size = 1000
-        num_batches = len(descriptions) // batch_size
 
-    for i in range(num_batches):
-        batch_descriptions = descriptions[i * batch_size:(i + 1) * batch_size]
-        batch_labels = labels[i * batch_size:(i + 1) * batch_size]
-        
-        feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
-        labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0)
-        
-        feature_num = feature_input.shape[1]
-        for frame_idx in range(feature_num):
-            feature_input[:, frame_idx] = deductor.ema_majority_smooth(feature_input[:, frame_idx], threshold=0.5, window_size=10)
-        
-        deductor.construct_rule_statements()
-        deductor.init_shield_layer(feature_num)
-        corrected_feature_input = deductor.shield_layer(feature_input.clone())
+    # Split data into training and validation sets using train_test_split
+    train_descriptions, val_descriptions, train_labels, val_labels = train_test_split(
+        descriptions, labels, test_size=0.2, random_state=42
+    )
+    num_train_batches = len(train_descriptions) // batch_size
+    num_val_batches = len(val_descriptions) // batch_size
+    deductor.classification_model = VADSR(k=feature_num)
+    deductor.criterion = nn.BCELoss()
+    deductor.optimizer = optim.AdamW(deductor.classification_model.parameters(), lr=0.001, weight_decay=1e-5)
 
-        breakpoint()
-        
-        if not deductor.classification_model:
-            print('Initializing classification model')
-            deductor.classification_model = VADSR(feature_dim=feature_num, n=batch_size)
-            deductor.criterion = nn.BCELoss()
-            deductor.optimizer = optim.Adam(deductor.classification_model.parameters(), lr=0.001)
-        else:
-            print('Loading existing classification model')
-            deductor.classification_model.load_state_dict(torch.load(f'{args.data}/vadsr.pth'))
-        
-        num_epochs = 500
-        for epoch in range(num_epochs):
+    for epoch in range(num_epochs):
+        train_loss = 0.0
+        val_loss = 0.0
+
+        deductor.classification_model.train()
+        for i in range(num_train_batches):
+            batch_descriptions = train_descriptions[i * batch_size:(i + 1) * batch_size]
+            batch_labels = train_labels[i * batch_size:(i + 1) * batch_size]
+            
+            feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
+            labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0)
+            
+            for feature_idx in range(feature_num):
+                feature_input[:, feature_idx] = deductor.ema_majority_smooth(feature_input[:, feature_idx], threshold=0.5, window_size=10)
+            
+            corrected_feature_input = deductor.shield_layer(feature_input.clone())
             deductor.optimizer.zero_grad()
             outputs = deductor.classification_model(corrected_feature_input)
             loss = deductor.criterion(outputs, labels_tensor)
             loss.backward()
             deductor.optimizer.step()
-            
-            if (epoch + 1) % 100 == 0 or epoch == 0:
-                print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+            train_loss += loss.item()
         
-        predictions = outputs.round().int().squeeze()
-        true_labels = labels_tensor.round().int().squeeze()
-        
-        accuracy = accuracy_score(true_labels, predictions)
-        precision = precision_score(true_labels, predictions)
-        recall = recall_score(true_labels, predictions)
-        roc_auc = roc_auc_score(true_labels, predictions)
-        
+        train_loss /= num_train_batches
+
+        deductor.classification_model.eval()
+        with torch.no_grad():
+            for i in range(num_val_batches):
+                batch_descriptions = val_descriptions[i * batch_size:(i + 1) * batch_size]
+                batch_labels = val_labels[i * batch_size:(i + 1) * batch_size]
+                
+                feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
+                labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0)
+                
+                for feature_idx in range(feature_num):
+                    feature_input[:, feature_idx] = deductor.ema_majority_smooth(feature_input[:, feature_idx], threshold=0.5, window_size=10)
+                
+                corrected_feature_input = deductor.shield_layer(feature_input.clone())
+                outputs = deductor.classification_model(corrected_feature_input)
+                loss = deductor.criterion(outputs, labels_tensor)
+                val_loss += loss.item()
+
+        val_loss /= num_val_batches
+        print(f'Epoch [{epoch+1}/{num_epochs}], Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}')
+
+    torch.save(deductor.classification_model.state_dict(), f'benchmarks/{args.data}/vadsr_{args.data}.pth')
+
+    # TODO: Implement separate testing
+    deductor.classification_model.load_state_dict(torch.load(f'benchmarks/{args.data}/vadsr_{args.data}.pth', weights_only=True))
+    deductor.classification_model.eval()
+
+    random_indices = random.sample(range(len(descriptions)), 1000)
+    random_descriptions = [descriptions[i] for i in random_indices]
+    random_labels = [labels[i] for i in random_indices]
+
+    with torch.no_grad():
+        feature_input = deductor.frame_descriptions_to_features(random_descriptions)
+        labels_tensor = torch.tensor(random_labels, dtype=torch.float32)
+
+        corrected_feature_input = deductor.shield_layer(feature_input.clone())
+        outputs = deductor.classification_model(corrected_feature_input)
+        print(outputs)
+        predictions = torch.round(outputs).squeeze(0).tolist()
+
+        accuracy = accuracy_score(labels_tensor.tolist(), predictions)
+        precision = precision_score(labels_tensor.tolist(), predictions)
+        recall = recall_score(labels_tensor.tolist(), predictions)
+        roc_auc = roc_auc_score(labels_tensor.tolist(), predictions)
+
         print(f'Accuracy: {accuracy:.4f}')
         print(f'Precision: {precision:.4f}')
         print(f'Recall: {recall:.4f}')
         print(f'ROC AUC: {roc_auc:.4f}')
-        
-        torch.save(deductor.classification_model.state_dict(), f'{args.data}/vadsr.pth')
+
+    

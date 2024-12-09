@@ -31,7 +31,7 @@ class Induction:
         self.abnormal_objects = None
 
     def select_frames(self):
-        df = pd.read_csv(f'{self.args.data}/train.csv')
+        df = pd.read_csv(f'benchmarks/{self.args.data}/train.csv')
         image_file_paths = list(df.loc[df['label'] == 0, 'image_path'].values)
         random_frame_paths = np.random.choice(image_file_paths, self.args.batch_size, replace=False)
         self.frame_paths = [f"{self.args.root}{path}" for path in random_frame_paths]
@@ -87,7 +87,7 @@ class Induction:
             "abnormal_objects": self.abnormal_objects
         }
 
-        output_file = f"{self.args.data}/rules.json"
+        output_file = f"benchmarks/{self.args.data}/rules.json"
         with open(output_file, 'w') as f:
             json.dump(output_data, f, indent=4)
 

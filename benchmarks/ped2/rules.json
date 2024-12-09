@@ -1,0 +1,37 @@
+{
+    "normal_activities": [
+        "running",
+        "walking"
+    ],
+    "abnormal_activities": [
+        "shoplifting",
+        "fighting",
+        "loitering",
+        "armed robbery",
+        "unattended bike",
+        "suspicious package",
+        "breaking glass",
+        "abandoned child",
+        "vehicle break-in",
+        "vandalism"
+    ],
+    "normal_objects": [
+        "bushes",
+        "building",
+        "people",
+        "light poles",
+        "street lamp"
+    ],
+    "abnormal_objects": [
+        "construction",
+        "helmet",
+        "bike",
+        "vehicle",
+        "bag",
+        "billboard",
+        "drone",
+        "fireworks",
+        "umbrella",
+        "car"
+    ]
+}
