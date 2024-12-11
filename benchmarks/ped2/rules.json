@@ -7,13 +7,7 @@
         "shoplifting",
         "fighting",
         "loitering",
-        "armed robbery",
-        "unattended bike",
-        "suspicious package",
-        "breaking glass",
-        "abandoned child",
-        "vehicle break-in",
-        "vandalism"
+        "biking"
     ],
     "normal_objects": [
         "bushes",
@@ -23,15 +17,10 @@
         "street lamp"
     ],
     "abnormal_objects": [
-        "construction",
-        "helmet",
         "bike",
+        "bicycle",
         "vehicle",
         "bag",
-        "billboard",
-        "drone",
-        "fireworks",
-        "umbrella",
         "car"
     ]
 }

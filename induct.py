@@ -9,7 +9,7 @@ from transformers import pipeline, AutoProcessor, MllamaForConditionalGeneration
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='SHTech', choices=['SHTech', 'avenue', 'ped2', 'UBNormal'], help='Dataset name')
+    parser.add_argument('--data', type=str, default='ped2', choices=['SHTech', 'avenue', 'ped2', 'UBNormal'], help='Dataset name')
     parser.add_argument('--root', type=str, default='/data/tjf5667/datasets/', help='Root directory for datasets')
     parser.add_argument('--batch_size', type=int, default=10)
     parser.add_argument('--activity_limit', type=int, default=10, help='Maximum amount of activities to derive')
@@ -120,7 +120,7 @@ class Prompts:
             """
 
     def abnormal_activities(self, normal_activities):
-            return f"""Given these normal activities {normal_activities}, please list at most {self.activity_limit} potential abnormal human activities from the context of these normal activites.
+            return f"""Given these normal activities {normal_activities}, please list at most {self.activity_limit} potential abnormal human activities from the context of these normal activities.
             List them using short terms, not an entire sentence. Output the information in the following format, with no deviations:
             Example:
             1. Fighting
