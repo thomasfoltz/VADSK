@@ -4,7 +4,7 @@
 
 Thomas Foltz, Huijuan Xu
 
-![image](https://github.com/user-attachments/assets/35be05f5-7cff-4753-a246-9c073ef1e9f7)
+![image](https://github.com/user-attachments/assets/c64d7ca7-94ea-4203-8449-68282c53b95b)
 
 
 ## Overview
@@ -34,4 +34,11 @@ This project requires Python 3.10 and the packages listed in `requirements.txt`.
 conda create -n vadsr python=3.10
 conda activate vadsr
 pip install -r requirements.txt
+```
+
+### Running VADSR
+
+```bash
+python induct.py --data {SHTech, avenue, ped2}
+python deduct.py --data {SHTech, avenue, ped2}
 ```
