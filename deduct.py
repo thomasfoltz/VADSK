@@ -124,29 +124,28 @@ class Deduction:
 
 if __name__ == "__main__":
     args = parse_arguments()
-        
-    # bnb_config = BitsAndBytesConfig(
-    #     load_in_4bit=True,
-    #     bnb_4bit_quant_type="nf4",
-    #     bnb_4bit_compute_dtype=torch.bfloat16
-    # )
-
-    # vlm_model = MllamaForConditionalGeneration.from_pretrained(
-    #     'meta-llama/Llama-3.2-11B-Vision-Instruct',
-    #     torch_dtype=torch.bfloat16,
-    #     low_cpu_mem_usage=True,
-    #     quantization_config=bnb_config,
-    #     device_map='auto'
-    # )
-
-    # processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
-    # deductor = Deduction(vlm_model, processor, args)
-    # deductor.set_frame_paths()
-    # deductor.process_vlm_message()
-    # deductor.generate_frame_descriptions()
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    deductor = Deduction(None, None, args)
+        
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16
+    )
+
+    vlm_model = MllamaForConditionalGeneration.from_pretrained(
+        'meta-llama/Llama-3.2-11B-Vision-Instruct',
+        torch_dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
+        quantization_config=bnb_config,
+        device_map='auto'
+    )
+
+    processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
+    deductor = Deduction(vlm_model, processor, args)
+    deductor.set_frame_paths()
+    deductor.process_vlm_message()
+    deductor.generate_frame_descriptions()
+
     deductor.set_keywords()
     deductor.group_frames()
     deductor.construct_rule_statements()
@@ -170,11 +169,19 @@ if __name__ == "__main__":
 
     neg_class_total = sum(1 for label in train_labels if label == 0)
     neg_class_prop = neg_class_total / len(train_labels)
+    
     # SHTech: neg class (0) - 0.5739, pos class (1) - 0.4261
     # ped2: neg class (0) - 0.1859, pos class (1) - 0.8141
     # avenue: neg class (0) - 0.747, pos class (1) - 0.253
 
-    pos_weight = torch.tensor([0.4], dtype=torch.float32, device=device) # 0.3-0.4 for ped2, ~4-5 for avenue, ~2 for SHTech
+    # TODO: find way to do this without hard-coding
+    if args.data == 'SHTech':
+        pos_weight = torch.tensor([2.0], dtype=torch.float32, device=device)
+    elif args.data == 'avenue':
+        pos_weight = torch.tensor([4.0], dtype=torch.float32, device=device)
+    elif args.data == 'ped2':
+        pos_weight = torch.tensor([0.4], dtype=torch.float32, device=device)
+
     deductor.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight) # TODO: need to explore different weightings for class imbalance
     deductor.optimizer = optim.AdamW(deductor.VADSR.parameters(), lr=0.001, weight_decay=1e-5)
 
