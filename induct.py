@@ -14,10 +14,7 @@ def parse_arguments():
     return parser.parse_args()
 
 def tfidf(corpus):
-    vectorizer = TfidfVectorizer(decode_error='ignore', 
-                                 ngram_range=(1, 3), 
-                                 max_features=500
-                                 )
+    vectorizer = TfidfVectorizer(decode_error='ignore', ngram_range=(1, 3), max_features=500)
     tfidf_matrix = vectorizer.fit_transform(corpus)
     return tfidf_matrix, vectorizer
 

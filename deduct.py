@@ -54,7 +54,7 @@ class Deduction:
         self.vlm_message = self.processor.apply_chat_template(messages, add_generation_prompt=True)
 
     def generate_frame_descriptions(self):
-        def setup_input(self, frame_path):
+        def setup_input(frame_path):
             image = Image.open(f"{self.args.root}{frame_path}").convert('RGB')
             input = self.processor(
                 image,
@@ -64,7 +64,7 @@ class Deduction:
             ).to('cuda')
             return input
         
-        def generate_output(self, input):
+        def generate_output(input):
             with torch.no_grad():
                 output = self.vlm_model.generate(**input, max_new_tokens=128)
             return self.processor.decode(output[0])
