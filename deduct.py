@@ -1,26 +1,31 @@
-import argparse
-import csv
-import json
+import argparse, csv, json, torch
 import pandas as pd
-import torch
-import re
 import torch.nn as nn
 import torch.optim as optim
 
 from PIL import Image
 from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold, train_test_split
 from pishield.shield_layer import ShieldLayer
-from models import VADSR_CNN as VADSR
+from model import VADSR
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='ped2', choices=['SHTech', 'avenue', 'ped2', 'UBNormal'], help='Dataset name')
     parser.add_argument('--root', type=str, default='/data/tjf5667/datasets/', help='Root directory for datasets')
     parser.add_argument('--batch_size', type=int, default=200)
-    parser.add_argument('--num_epochs', type=int, default=5)
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--kfolds', type=int, default=5)
+    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--decay', type=float, default=0.01)
     return parser.parse_args()
+
+def calculate_cls_weight(labels):
+    anomaly_count = sum(1 for label in labels if label == 1)
+    anomaly_prop = anomaly_count / len(labels)
+    cls_weight = torch.tensor([(1-anomaly_prop)/anomaly_prop], dtype=torch.float32, device=device)
+    return cls_weight
 
 class Deduction:
     def __init__(self, vlm_model, processor, args):
@@ -31,30 +36,25 @@ class Deduction:
         self.frame_paths = None
         self.vlm_message = None
         self.keywords = None
-        self.grouped_frames = None
-        self.rules = {}
+        self.feature_dim = None
+        self.cls_weight = None
         self.rule_num = 0
         self.shield_layer = None
         self.VADSR = None
         self.criterion = None
         self.optimizer = None
 
-    def set_frame_paths(self):
+    def init_frame_paths(self):
         self.labels = pd.read_csv(f'benchmarks/{self.args.data}/test.csv').iloc[:, 1].tolist()
         self.frame_paths = pd.read_csv(f'benchmarks/{self.args.data}/test.csv').iloc[:, 0].tolist()
 
-    def process_vlm_message(self):
-        messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "How many people are in the image and what is each of them doing? What are in the images other than people? Think step by step."}]}]
+    def setup_vlm_prompt(self):
+        messages = [{"role": "system", "content": "You are a surveillance monitor for urban safety"},
+                    {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Describe the activities and objects present in this scene."}]}]
         self.vlm_message = self.processor.apply_chat_template(messages, add_generation_prompt=True)
 
-    def parse_frame_description(self, unparsed_frame_description):
-        split_frame_description = unparsed_frame_description.split('<|end_header_id|>\n\n')[2]
-        frame_description = split_frame_description.replace('.', ' ').replace('\n', '').replace('<|eot_id|>', '').lower()
-        return frame_description
-
     def generate_frame_descriptions(self):
-        for frame_path, label in zip(self.frame_paths, self.labels):
-            print(frame_path)
+        def setup_input(self, frame_path):
             image = Image.open(f"{self.args.root}{frame_path}").convert('RGB')
             input = self.processor(
                 image,
@@ -62,65 +62,52 @@ class Deduction:
                 add_special_tokens=False,
                 return_tensors="pt"
             ).to('cuda')
-
+            return input
+        
+        def generate_output(self, input):
             with torch.no_grad():
                 output = self.vlm_model.generate(**input, max_new_tokens=128)
-                unparsed_frame_description = self.processor.decode(output[0])
-            
-            frame_description = self.parse_frame_description(unparsed_frame_description)
+            return self.processor.decode(output[0])
 
-            with open(f"benchmarks/{self.args.data}/test_descriptions.csv", 'a', newline='') as f:
+        for frame_path, label in zip(self.frame_paths, self.labels):
+            print('Generating frame description:', frame_path)
+            input = setup_input(frame_path)
+            output = generate_output(input)
+
+            content = output.split('assistant<|end_header_id|>')[1].strip('<|eot_id|>')
+            frame_description = content.strip().lower().replace('\n', '')
+
+            with open(f"benchmarks/{self.args.data}/descriptions.csv", 'a', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([frame_path, label, frame_description])
 
-    def set_keywords(self):
-        with open(f'benchmarks/{self.args.data}/rules.json', 'r') as f:
-            rules = json.load(f)
-        self.keywords = [None] + rules['normal_activities'] + [None] + rules['abnormal_activities'] + [None] + rules['normal_objects'] + [None] + rules['abnormal_objects']
+    def init_keywords(self):        
+        with open(f'benchmarks/{self.args.data}/keywords.json', 'r') as f:
+            keyword_data = json.load(f)
 
-    def group_frames(self):
-        with open(f'benchmarks/{self.args.data}/test_descriptions.csv', 'r') as f:
-            df = pd.read_csv(f, header=None, names=['frame_path', 'label', 'description'])
-            # df['video_id'] = df['frame_path'].apply(lambda x: '_'.join(x.split('/')[-1].split('_')[:2])) # TODO: if extracting from train_descriptions
-            df['video_id'] = df['frame_path'].apply(lambda x: x.split('/')[-2])
-            self.grouped_frames = df.groupby('video_id')
+        self.keywords = keyword_data['keywords']
+        self.used_frame_paths = keyword_data['normal_frame_paths'] + keyword_data['abnormal_frame_paths']
+        self.feature_dim = len(self.keywords)
+
+    def init_classifier(self):
+        self.VADSR = VADSR(feature_dim=self.feature_dim).to(device)
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=self.cls_weight)
+        self.optimizer = optim.AdamW(self.VADSR.parameters(), lr=self.args.lr, weight_decay=self.args.decay)
 
     def frame_descriptions_to_features(self, frame_descriptions):
-        num_keywords = len(self.keywords)
-        num_frames = len(frame_descriptions)
-        feature_input = torch.zeros((num_frames, num_keywords), dtype=torch.float32)
-
-        for frame_idx, description in enumerate(frame_descriptions):
-            for keyword_idx, keyword in enumerate(self.keywords):
-                if keyword is not None and re.search(r'\b' + keyword + r'\b', description):
-                    feature_input[frame_idx, keyword_idx] = 1.0
-
+        feature_input = torch.zeros((len(frame_descriptions), self.feature_dim), dtype=torch.float32)
+        for j, keyword in enumerate(list(self.keywords.keys())):
+            weight = self.keywords[keyword]
+            matches = [weight if keyword in desc else 0 for desc in frame_descriptions]
+            feature_input[:, j] = torch.tensor(matches, dtype=torch.float32)
         return feature_input
-    
-    def construct_rule_statements(self):
-        with open(f'benchmarks/{self.args.data}/rules.json', 'r') as file:
-            rules_dict = json.load(file)
-
-        for key, values in rules_dict.items():
-            self.rules[key] = [f'y_{self.rule_num}']
-            self.rule_num += 1
-            self.rules[key].extend(f'y_{self.rule_num + i}' for i in range(len(values)))
-            self.rule_num += len(values)
-
-        with open(f'benchmarks/{self.args.data}/propositional_statements.txt', 'w') as file:
-            for values in self.rules.values():
-                file.write(' or '.join(values) + '\n')
-
-    def init_shield_layer(self, feature_num):
+            
+    def init_shield_layer(self):
         self.shield_layer = ShieldLayer(
-            feature_num,
-            f'benchmarks/{self.args.data}/propositional_statements.txt', 
-            ordering=list(range(self.rule_num)), 
+            self.feature_dim,
+            f'benchmarks/{self.args.data}/propositions.txt', # TODO: write implementation for propositions in induct.py
+            ordering=list(range(self.rule_num)), # TODO: derive ahead of time
         )
-
-    def show_frame_feature_matches(self, feature_input, frame_idx):
-        match_idx = torch.where(feature_input[frame_idx, :] == 1.0)[0].tolist()
-        print(f'Frame {frame_idx}: {[self.keywords[idx] for idx in match_idx]}')
 
 if __name__ == "__main__":
     args = parse_arguments()
@@ -137,115 +124,115 @@ if __name__ == "__main__":
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
         quantization_config=bnb_config,
-        device_map='auto'
     )
 
     processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
+
     deductor = Deduction(vlm_model, processor, args)
-    deductor.set_frame_paths()
-    deductor.process_vlm_message()
+
+    deductor.init_frame_paths()
+    deductor.setup_vlm_prompt()
     deductor.generate_frame_descriptions()
-
-    deductor.set_keywords()
-    deductor.group_frames()
-    deductor.construct_rule_statements()
-    feature_num = len(deductor.keywords)
-    deductor.init_shield_layer(feature_num)
-    deductor.VADSR = VADSR(k=feature_num).to(device)
-
-    df = pd.read_csv(f'benchmarks/{args.data}/test_descriptions.csv', header=None, names=['frame_path', 'label', 'description'])
-    descriptions = df['description'].tolist()
-    labels = df['label'].tolist()
-
-    train_descriptions, eval_descriptions, train_labels, eval_labels = train_test_split(
-        descriptions, labels, test_size=0.3, random_state=42
-    )
-    val_descriptions, test_descriptions, val_labels, test_labels = train_test_split(
-        eval_descriptions, eval_labels, test_size=0.5, random_state=42
-    )
-    num_train_batches = len(train_descriptions) // args.batch_size
-    num_val_batches = len(val_descriptions) // args.batch_size
-    num_test_batches = len(test_descriptions) // args.batch_size
-
-    neg_class_total = sum(1 for label in train_labels if label == 0)
-    neg_class_prop = neg_class_total / len(train_labels)
     
-    # SHTech: neg class (0) - 0.5739, pos class (1) - 0.4261
-    # ped2: neg class (0) - 0.1859, pos class (1) - 0.8141
-    # avenue: neg class (0) - 0.747, pos class (1) - 0.253
+    deductor.init_keywords()
+    # deductor.init_shield_layer() # TODO: might be unutilized
 
-    # TODO: find way to do this without hard-coding
-    if args.data == 'SHTech':
-        pos_weight = torch.tensor([2.0], dtype=torch.float32, device=device)
-    elif args.data == 'avenue':
-        pos_weight = torch.tensor([4.0], dtype=torch.float32, device=device)
-    elif args.data == 'ped2':
-        pos_weight = torch.tensor([0.4], dtype=torch.float32, device=device)
+    df = pd.read_csv(f'benchmarks/{args.data}/descriptions.csv', header=None, names=['frame_path', 'label', 'description'])
+    df = df[~df['frame_path'].isin(deductor.used_frame_paths)]
 
-    deductor.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight) # TODO: need to explore different weightings for class imbalance
-    deductor.optimizer = optim.AdamW(deductor.VADSR.parameters(), lr=0.001, weight_decay=1e-5)
+    train_paths, test_paths, train_descriptions, test_descriptions, train_labels, test_labels = train_test_split(
+        df['frame_path'].tolist(), df['description'].tolist(), df['label'].tolist(), 
+        test_size=0.2, random_state=42
+    )
 
-    for epoch in range(args.num_epochs):
-        train_loss, val_loss = 0.0, 0.0
+    train_losses, val_losses = [], []
+    best_val_loss, best_model_state = float('inf'), None
+    deductor.cls_weight = calculate_cls_weight(train_labels)
+    kf = KFold(n_splits=args.kfolds, shuffle=True, random_state=42)
 
-        # TRAINING
-        deductor.VADSR.train()
-        for i in range(num_train_batches):
-            batch_descriptions = train_descriptions[i * args.batch_size:(i + 1) * args.batch_size]
-            batch_labels = train_labels[i * args.batch_size:(i + 1) * args.batch_size]
-            labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0).to(device)
-            
-            feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
-            shielded_feature_input = deductor.shield_layer(feature_input).to(device)
+    for fold, (train_index, val_index) in enumerate(kf.split(list(range(len(train_paths))))):
+        print(f'Fold {fold + 1}/{args.kfolds}')
 
-            deductor.optimizer.zero_grad()
+        train_descriptions_fold = [train_descriptions[i] for i in train_index]
+        train_labels_fold = [train_labels[i] for i in train_index]
+        train_paths_fold = [train_paths[i] for i in train_index]
+        
+        val_descriptions_fold = [train_descriptions[i] for i in val_index]
+        val_labels_fold = [train_labels[i] for i in val_index]
+        val_paths_fold = [train_paths[i] for i in val_index]
 
-            outputs = deductor.VADSR(shielded_feature_input)
-            loss = deductor.criterion(outputs, labels_tensor)
-            train_loss += loss.item()
-            
-            loss.backward()
-            deductor.optimizer.step()
+        train_batches = len(train_paths_fold) // args.batch_size
+        val_batches = len(val_paths_fold) // args.batch_size
 
-        train_loss /= num_train_batches
+        deductor.init_classifier()
 
-        # VALIDATION
-        deductor.VADSR.eval()
-        with torch.no_grad():
-            for i in range(num_val_batches):
-                batch_descriptions = val_descriptions[i * args.batch_size:(i + 1) * args.batch_size]
-                batch_labels = val_labels[i * args.batch_size:(i + 1) * args.batch_size]
+        for epoch in range(args.epochs):
+            train_loss, val_loss = 0.0, 0.0
+
+            deductor.VADSR.train()
+            for i in range(train_batches):
+                deductor.optimizer.zero_grad()
+
+                batch_descriptions = train_descriptions_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                batch_labels = train_labels_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                batch_images = train_paths_fold[i * args.batch_size:(i + 1) * args.batch_size]
+
                 labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0).to(device)
-                
                 feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
-                shielded_feature_input = deductor.shield_layer(feature_input).to(device)
-                
-                outputs = deductor.VADSR(shielded_feature_input)
+                outputs = deductor.VADSR(feature_input.to(device))
+
                 loss = deductor.criterion(outputs, labels_tensor)
-                val_loss += loss.item()
+                train_loss += loss.item()
+                
+                loss.backward()
+                deductor.optimizer.step()
 
-        val_loss /= num_val_batches
+            train_loss /= train_batches
+            train_losses.append(train_loss)
 
-        print(f'Epoch [{epoch+1}/{args.num_epochs}], Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}')
+            deductor.VADSR.eval()
+            with torch.no_grad():
+                for i in range(val_batches):
+                    batch_descriptions = val_descriptions_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                    batch_labels = val_labels_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                    batch_images = val_paths_fold[i * args.batch_size:(i + 1) * args.batch_size]
+
+                    labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0).to(device)
+                    feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
+                    outputs = deductor.VADSR(feature_input.to(device))
+
+                    loss = deductor.criterion(outputs, labels_tensor)
+                    val_loss += loss.item()
+
+            val_loss /= val_batches
+            val_losses.append(val_loss)
+
+            print(f'Epoch {epoch + 1}/{args.epochs}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_state = deductor.VADSR.state_dict()
     
-    torch.save(deductor.VADSR.state_dict(), f'benchmarks/{args.data}/vadsr_{args.data}.pth')
-    # deductor.VADSR.load_state_dict(torch.load(f'benchmarks/{args.data}/vadsr_{args.data}.pth', weights_only=True))
+    average_train_loss = sum(train_losses) / len(train_losses)
+    average_val_loss = sum(val_losses) / len(val_losses)
 
-    # TESTING
+    print(f'Average Train Loss: {average_train_loss:.4f}')
+    print(f'Average Val Loss: {average_val_loss:.4f}')
+
+    torch.save(best_model_state, f'benchmarks/{args.data}/vadsr.pth')
+    deductor.VADSR.load_state_dict(torch.load(f'benchmarks/{args.data}/vadsr.pth', weights_only=True))
+
     deductor.VADSR.eval()
     with torch.no_grad():
-        labels_tensor = torch.tensor(test_labels, dtype=torch.float32).to(device)
-        
         feature_input = deductor.frame_descriptions_to_features(test_descriptions)
-        shielded_feature_input = deductor.shield_layer(feature_input).to(device)
-        
-        outputs = deductor.VADSR(shielded_feature_input)
+        outputs = deductor.VADSR(feature_input.to(device))
+        probs = torch.sigmoid(outputs)
+        predictions = torch.round(probs).squeeze(0).tolist() # TODO: experiment with thresholding
 
-        predictions = torch.round(outputs).squeeze(0).tolist() # TODO: better thresholding
-        accuracy = accuracy_score(labels_tensor.tolist(), predictions)
-        precision = precision_score(labels_tensor.tolist(), predictions)
-        recall = recall_score(labels_tensor.tolist(), predictions)
-        roc_auc = roc_auc_score(labels_tensor.tolist(), predictions)
+        accuracy = accuracy_score(test_labels, predictions)
+        precision = precision_score(test_labels, predictions)
+        recall = recall_score(test_labels, predictions)
+        roc_auc = roc_auc_score(test_labels, predictions)
 
         print(f'Accuracy: {accuracy:.4f}')
         print(f'Precision: {precision:.4f}')
