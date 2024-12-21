@@ -4,7 +4,10 @@
 
 Thomas Foltz, Huijuan Xu
 
-![image](https://github.com/user-attachments/assets/c64d7ca7-94ea-4203-8449-68282c53b95b)
+
+![image](https://github.com/user-attachments/assets/77c8f19e-bff2-4171-a5a9-694f24f3f4ec)
+
+
 
 
 ## Overview
