@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 
 from PIL import Image
-from transformers import pipeline, AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
 from sklearn.feature_extraction.text import TfidfVectorizer
+from transformers import pipeline, AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -21,8 +21,7 @@ def tfidf(corpus):
 def tfidf_normalized_diff(tfidf_matrix):
     tfidf_diff = (tfidf_matrix[1] - tfidf_matrix[0]).toarray().flatten()
     tfidf_min, tf_idf_max = np.min(tfidf_diff), np.max(tfidf_diff)
-    tfidf_diff = (tfidf_diff - tfidf_min) / (tf_idf_max - tfidf_min)
-    return tfidf_diff
+    return (tfidf_diff - tfidf_min) / (tf_idf_max - tfidf_min)
 
 class Induction:
     def __init__(self, vlm_model, instruct_model, processor, args):
@@ -43,8 +42,8 @@ class Induction:
         def load_frame_paths(file_path, label, batch_size):
             df = pd.read_csv(file_path)
             image_file_paths = df.loc[df['label'] == label, 'image_path'].values
-            selected_frame_paths = np.random.choice(image_file_paths, batch_size, replace=False).tolist()
-            return selected_frame_paths
+            selected_frame_paths = np.random.choice(image_file_paths, batch_size, replace=False)
+            return selected_frame_paths.tolist()
 
         self.normal_frame_paths = load_frame_paths(f'benchmarks/{self.args.data}/train.csv', 0, self.args.batch_size)
         self.abnormal_frame_paths = load_frame_paths(f'benchmarks/{self.args.data}/test.csv', 1, self.args.batch_size)

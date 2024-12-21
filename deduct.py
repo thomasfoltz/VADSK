@@ -1,14 +1,13 @@
 import argparse, csv, json, torch
-import pandas as pd
-import torch.nn as nn
 import torch.optim as optim
+import torch.nn as nn
+import pandas as pd
 
 from PIL import Image
-from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
-from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
-from sklearn.model_selection import KFold, train_test_split
-from pishield.shield_layer import ShieldLayer
 from model import VADSR
+from sklearn.model_selection import KFold, train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -101,13 +100,6 @@ class Deduction:
             matches = [weight if keyword in desc else 0 for desc in frame_descriptions]
             feature_input[:, j] = torch.tensor(matches, dtype=torch.float32)
         return feature_input
-            
-    def init_shield_layer(self):
-        self.shield_layer = ShieldLayer(
-            self.feature_dim,
-            f'benchmarks/{self.args.data}/propositions.txt', # TODO: write implementation for propositions in induct.py
-            ordering=list(range(self.rule_num)), # TODO: derive ahead of time
-        )
 
 if __name__ == "__main__":
     args = parse_arguments()
@@ -133,9 +125,7 @@ if __name__ == "__main__":
     deductor.init_frame_paths()
     deductor.setup_vlm_prompt()
     deductor.generate_frame_descriptions()
-    
     deductor.init_keywords()
-    # deductor.init_shield_layer() # TODO: might be unutilized
 
     df = pd.read_csv(f'benchmarks/{args.data}/descriptions.csv', header=None, names=['frame_path', 'label', 'description'])
     df = df[~df['frame_path'].isin(deductor.used_frame_paths)]

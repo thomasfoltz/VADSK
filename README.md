@@ -9,20 +9,20 @@ Thomas Foltz, Huijuan Xu
 
 ## Overview
 
-This project introduces VADSR, a novel approach for video anomaly detection that leverages structured rules. Inspired by AnomalyRuler and PiShield, VADSR combines rule-based anomaly detection with a propositional requirement layer to effectively identify and explain anomalous events in video data.
+This project introduces VADSR, a novel approach for video anomaly detection that leverages structured rules. Inspired by AnomalyRuler and TF-IDF, VADSR combines video captioning, text feature extracting, and deep neural networks to effectively identify anomalous events in video data.
 
 ## Key Features
 
-*   **Accurate Anomaly Detection:**
-*   **Explainable Anomalies**
+*   **Detection Precision**
+*   **Interpretable Input**
 *   **Efficient Processing**
 
 ## Methodology
 
-VADSR builds upon the foundations of AnomalyRuler and PiShield, adapting and extending their core principles:
+VADSR builds upon the foundations of AnomalyRuler and the SKLearn TF-IDF library, adapting and extending their core principles:
 
-*   **AnomalyRuler:**  VADSR adopts the rule-based anomaly detection framework from [AnomalyRuler](https://github.com/Yuchen413/AnomalyRuler), utilizing a similar induction and deduction pipeline for rule and frame description generation. However, VADSR extends this framework by employing a classification network for final anomaly identification rather than utilizing a LLM for reasoning.
-*   **PiShield:** For more details on PiShield, please refer to the [PiShield README](./pishield/README.md).
+*   **AnomalyRuler:**  VADSR adopts the rule-based anomaly detection framework from [AnomalyRuler](https://github.com/Yuchen413/AnomalyRuler), utilizing a similar induction and deduction pipeline for extracting meaningful text features. However, VADSR simplifies these pipelines by deriving keywords with text processing rather than an LLM and employing a classification network for detection instead of employing an extra LLM for reasoning.
+*   **TF-IDF:** For more details on TF-IDF, please refer to their [Documentation](https://scikit-learn.org/1.5/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html).
 
 ## Dependencies
 
@@ -39,6 +39,6 @@ pip install -r requirements.txt
 ### Running VADSR
 
 ```bash
-python induct.py --data {SHTech, avenue, ped2}
-python deduct.py --data {SHTech, avenue, ped2}
+python induct.py --data {SHTech, avenue, ped2 (default)}
+python deduct.py --data {SHTech, avenue, ped2 (default)}
 ```
