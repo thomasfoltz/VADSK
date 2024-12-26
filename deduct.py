@@ -1,23 +1,26 @@
-import argparse, csv, json, torch
+import argparse, csv, json, os, torch
 import torch.optim as optim
 import torch.nn as nn
 import pandas as pd
 
 from PIL import Image
-from model import VADSR
+from model import VADSK
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
 from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='ped2', choices=['SHTech', 'avenue', 'ped2', 'UBNormal'], help='Dataset name')
+    parser.add_argument('--data', type=str, default='ped2', choices=['SHTech', 'avenue', 'ped2'])
     parser.add_argument('--root', type=str, default='/data/tjf5667/datasets/', help='Root directory for datasets')
-    parser.add_argument('--batch_size', type=int, default=200)
+    parser.add_argument('--batch_size', type=int, default=100)
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--kfolds', type=int, default=5)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--decay', type=float, default=0.01)
+    parser.add_argument('--threshold', type=float, default=0.5)
+    parser.add_argument('--train', action='store_true')
+    parser.add_argument('--test', action='store_true')
     return parser.parse_args()
 
 def calculate_cls_weight(labels):
@@ -27,19 +30,17 @@ def calculate_cls_weight(labels):
     return cls_weight
 
 class Deduction:
-    def __init__(self, vlm_model, processor, args):
+    def __init__(self, args, vlm_model, processor):
+        self.args = args
         self.vlm_model = vlm_model
         self.processor = processor
-        self.args = args
         self.labels = None
         self.frame_paths = None
         self.vlm_message = None
         self.keywords = None
         self.feature_dim = None
         self.cls_weight = None
-        self.rule_num = 0
-        self.shield_layer = None
-        self.VADSR = None
+        self.VADSK = None
         self.criterion = None
         self.optimizer = None
 
@@ -48,9 +49,9 @@ class Deduction:
         self.frame_paths = pd.read_csv(f'benchmarks/{self.args.data}/test.csv').iloc[:, 0].tolist()
 
     def setup_vlm_prompt(self):
-        messages = [{"role": "system", "content": "You are a surveillance monitor for urban safety"},
+        message = [{"role": "system", "content": "You are a surveillance monitor for urban safety"},
                     {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Describe the activities and objects present in this scene."}]}]
-        self.vlm_message = self.processor.apply_chat_template(messages, add_generation_prompt=True)
+        self.vlm_message = self.processor.apply_chat_template(message, add_generation_prompt=True)
 
     def generate_frame_descriptions(self):
         def setup_input(frame_path):
@@ -89,9 +90,9 @@ class Deduction:
         self.feature_dim = len(self.keywords)
 
     def init_classifier(self):
-        self.VADSR = VADSR(feature_dim=self.feature_dim).to(device)
+        self.VADSK = VADSK(feature_dim=self.feature_dim).to(device)
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=self.cls_weight)
-        self.optimizer = optim.AdamW(self.VADSR.parameters(), lr=self.args.lr, weight_decay=self.args.decay)
+        self.optimizer = optim.AdamW(self.VADSK.parameters(), lr=self.args.lr, weight_decay=self.args.decay)
 
     def frame_descriptions_to_features(self, frame_descriptions):
         feature_input = torch.zeros((len(frame_descriptions), self.feature_dim), dtype=torch.float32)
@@ -104,30 +105,34 @@ class Deduction:
 if __name__ == "__main__":
     args = parse_arguments()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16
-    )
+    descriptions_path = f'benchmarks/{args.data}/descriptions.csv'
 
-    vlm_model = MllamaForConditionalGeneration.from_pretrained(
-        'meta-llama/Llama-3.2-11B-Vision-Instruct',
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-        quantization_config=bnb_config,
-    )
+    if not os.path.exists(descriptions_path):
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16
+        )
 
-    processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
+        vlm_model = MllamaForConditionalGeneration.from_pretrained(
+            'meta-llama/Llama-3.2-11B-Vision-Instruct',
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
+            quantization_config=bnb_config,
+        )
 
-    deductor = Deduction(vlm_model, processor, args)
+        processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
+        deductor = Deduction(args, vlm_model, processor)
 
-    deductor.init_frame_paths()
-    deductor.setup_vlm_prompt()
-    deductor.generate_frame_descriptions()
+        deductor.init_frame_paths()
+        deductor.setup_vlm_prompt()
+        deductor.generate_frame_descriptions()
+
+    else:
+        deductor = Deduction(args, vlm_model=None, processor=None)
+
     deductor.init_keywords()
-
-    df = pd.read_csv(f'benchmarks/{args.data}/descriptions.csv', header=None, names=['frame_path', 'label', 'description'])
+    df = pd.read_csv(descriptions_path, header=None, names=['frame_path', 'label', 'description'])
     df = df[~df['frame_path'].isin(deductor.used_frame_paths)]
 
     train_paths, test_paths, train_descriptions, test_descriptions, train_labels, test_labels = train_test_split(
@@ -135,96 +140,102 @@ if __name__ == "__main__":
         test_size=0.2, random_state=42
     )
 
-    train_losses, val_losses = [], []
-    best_val_loss, best_model_state = float('inf'), None
-    deductor.cls_weight = calculate_cls_weight(train_labels)
-    kf = KFold(n_splits=args.kfolds, shuffle=True, random_state=42)
+    # vadsk_path = f'benchmarks/{args.data}/vadsk_{args.batch_size}_{args.epochs}_{args.lr}_{args.decay}.pth'
+    vadsk_path = f'benchmarks/{args.data}/test.pth'
 
-    for fold, (train_index, val_index) in enumerate(kf.split(list(range(len(train_paths))))):
-        print(f'Fold {fold + 1}/{args.kfolds}')
+    if args.train:
+        train_losses, val_losses = [], []
+        best_val_loss, best_model_state = float('inf'), None
+        deductor.cls_weight = calculate_cls_weight(train_labels)
+        kf = KFold(n_splits=args.kfolds, shuffle=True, random_state=42)
 
-        train_descriptions_fold = [train_descriptions[i] for i in train_index]
-        train_labels_fold = [train_labels[i] for i in train_index]
-        train_paths_fold = [train_paths[i] for i in train_index]
-        
-        val_descriptions_fold = [train_descriptions[i] for i in val_index]
-        val_labels_fold = [train_labels[i] for i in val_index]
-        val_paths_fold = [train_paths[i] for i in val_index]
+        for fold, (train_index, val_index) in enumerate(kf.split(list(range(len(train_paths))))):
+            print(f'Fold {fold + 1}/{args.kfolds}')
 
-        train_batches = len(train_paths_fold) // args.batch_size
-        val_batches = len(val_paths_fold) // args.batch_size
+            train_descriptions_fold = [train_descriptions[i] for i in train_index]
+            train_labels_fold = [train_labels[i] for i in train_index]
+            train_paths_fold = [train_paths[i] for i in train_index]
+            
+            val_descriptions_fold = [train_descriptions[i] for i in val_index]
+            val_labels_fold = [train_labels[i] for i in val_index]
+            val_paths_fold = [train_paths[i] for i in val_index]
 
-        deductor.init_classifier()
+            train_batches = len(train_paths_fold) // args.batch_size
+            val_batches = len(val_paths_fold) // args.batch_size
 
-        for epoch in range(args.epochs):
-            train_loss, val_loss = 0.0, 0.0
+            deductor.init_classifier()
 
-            deductor.VADSR.train()
-            for i in range(train_batches):
-                deductor.optimizer.zero_grad()
+            for epoch in range(args.epochs):
+                train_loss, val_loss = 0.0, 0.0
 
-                batch_descriptions = train_descriptions_fold[i * args.batch_size:(i + 1) * args.batch_size]
-                batch_labels = train_labels_fold[i * args.batch_size:(i + 1) * args.batch_size]
-                batch_images = train_paths_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                deductor.VADSK.train()
+                for i in range(train_batches):
+                    deductor.optimizer.zero_grad()
 
-                labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0).to(device)
-                feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
-                outputs = deductor.VADSR(feature_input.to(device))
-
-                loss = deductor.criterion(outputs, labels_tensor)
-                train_loss += loss.item()
-                
-                loss.backward()
-                deductor.optimizer.step()
-
-            train_loss /= train_batches
-            train_losses.append(train_loss)
-
-            deductor.VADSR.eval()
-            with torch.no_grad():
-                for i in range(val_batches):
-                    batch_descriptions = val_descriptions_fold[i * args.batch_size:(i + 1) * args.batch_size]
-                    batch_labels = val_labels_fold[i * args.batch_size:(i + 1) * args.batch_size]
-                    batch_images = val_paths_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                    batch_descriptions = train_descriptions_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                    batch_labels = train_labels_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                    batch_images = train_paths_fold[i * args.batch_size:(i + 1) * args.batch_size]
 
                     labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0).to(device)
                     feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
-                    outputs = deductor.VADSR(feature_input.to(device))
+                    outputs = deductor.VADSK(feature_input.to(device))
 
                     loss = deductor.criterion(outputs, labels_tensor)
-                    val_loss += loss.item()
+                    train_loss += loss.item()
+                    
+                    loss.backward()
+                    deductor.optimizer.step()
 
-            val_loss /= val_batches
-            val_losses.append(val_loss)
+                train_loss /= train_batches
+                train_losses.append(train_loss)
 
-            print(f'Epoch {epoch + 1}/{args.epochs}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
+                deductor.VADSK.eval()
+                with torch.no_grad():
+                    for i in range(val_batches):
+                        batch_descriptions = val_descriptions_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                        batch_labels = val_labels_fold[i * args.batch_size:(i + 1) * args.batch_size]
+                        batch_images = val_paths_fold[i * args.batch_size:(i + 1) * args.batch_size]
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_model_state = deductor.VADSR.state_dict()
-    
-    average_train_loss = sum(train_losses) / len(train_losses)
-    average_val_loss = sum(val_losses) / len(val_losses)
+                        labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0).to(device)
+                        feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
+                        outputs = deductor.VADSK(feature_input.to(device))
 
-    print(f'Average Train Loss: {average_train_loss:.4f}')
-    print(f'Average Val Loss: {average_val_loss:.4f}')
+                        loss = deductor.criterion(outputs, labels_tensor)
+                        val_loss += loss.item()
 
-    torch.save(best_model_state, f'benchmarks/{args.data}/vadsr.pth')
-    deductor.VADSR.load_state_dict(torch.load(f'benchmarks/{args.data}/vadsr.pth', weights_only=True))
+                val_loss /= val_batches
+                val_losses.append(val_loss)
 
-    deductor.VADSR.eval()
-    with torch.no_grad():
-        feature_input = deductor.frame_descriptions_to_features(test_descriptions)
-        outputs = deductor.VADSR(feature_input.to(device))
-        probs = torch.sigmoid(outputs)
-        predictions = torch.round(probs).squeeze(0).tolist() # TODO: experiment with thresholding
+                print(f'Epoch {epoch + 1}/{args.epochs}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
 
-        accuracy = accuracy_score(test_labels, predictions)
-        precision = precision_score(test_labels, predictions)
-        recall = recall_score(test_labels, predictions)
-        roc_auc = roc_auc_score(test_labels, predictions)
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_model_state = deductor.VADSK.state_dict()
+        
+        average_train_loss = sum(train_losses) / len(train_losses)
+        average_val_loss = sum(val_losses) / len(val_losses)
 
-        print(f'Accuracy: {accuracy:.4f}')
-        print(f'Precision: {precision:.4f}')
-        print(f'Recall: {recall:.4f}')
-        print(f'ROC AUC: {roc_auc:.4f}')
+        print(f'Average Train Loss: {average_train_loss:.4f}')
+        print(f'Average Val Loss: {average_val_loss:.4f}')
+
+        torch.save(best_model_state, vadsk_path)
+
+    if args.test:
+        deductor.init_classifier()
+        deductor.VADSK.load_state_dict(torch.load(vadsk_path, weights_only=True))
+        deductor.VADSK.eval()
+        with torch.no_grad():
+            feature_input = deductor.frame_descriptions_to_features(test_descriptions)
+            outputs = deductor.VADSK(feature_input.to(device))
+            probs = torch.sigmoid(outputs)
+            predictions = (probs >= args.threshold).squeeze(0).tolist()
+
+            accuracy = accuracy_score(test_labels, predictions)
+            precision = precision_score(test_labels, predictions)
+            recall = recall_score(test_labels, predictions)
+            roc_auc = roc_auc_score(test_labels, predictions)
+
+            print(f'Accuracy: {accuracy:.4f}')
+            print(f'Precision: {precision:.4f}')
+            print(f'Recall: {recall:.4f}')
+            print(f'ROC AUC: {roc_auc:.4f}')

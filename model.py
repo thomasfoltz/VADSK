@@ -1,8 +1,8 @@
 import torch.nn as nn
 
-class VADSR(nn.Module):
+class VADSK(nn.Module):
     def __init__(self, feature_dim):
-        super(VADSR, self).__init__()
+        super(VADSK, self).__init__()
         self.conv1 = nn.Conv1d(1, 16, kernel_size=3, stride=1, padding=1)
         self.relu1 = nn.ReLU()
         self.conv2 = nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1)
