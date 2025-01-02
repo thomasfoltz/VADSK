@@ -34,6 +34,3 @@ class VADSK(nn.Module):
         x = self.dropout2(self.relu7(self.fc2(x)))
         x = self.fc3(x)
         return x.T
-    
-
-
