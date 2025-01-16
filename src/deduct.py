@@ -5,7 +5,7 @@ import torch.nn as nn
 import pandas as pd
 
 from PIL import Image
-from model import VADSK
+from model import VADSK, VADSK_AUTOENCODER
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
 from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
@@ -13,10 +13,12 @@ from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndB
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='ped2', choices=['SHTech', 'avenue', 'ped2'])
-    parser.add_argument('--root', type=str, help='Root directory for datasets')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     parser.add_argument('--train', action='store_true', help='Flag to indicate training mode')
     parser.add_argument('--test', action='store_true', help='Flag to indicate testing mode')
     parser.add_argument('--interpret', action='store_true', help='Flag to generate feature input heatmap')
+    parser.add_argument('--live', action='store_true', help='Predict on live frame descriptions')
+    parser.add_argument('--root', type=str, help='Root directory for datasets')
     parser.add_argument('--batch_size', type=int, help='Batch size for training and validation')
     parser.add_argument('--epochs', type=int, help='Number of epochs for training')
     parser.add_argument('--k_folds', type=int, help='Number of folds for K-Fold cross-validation')
@@ -25,6 +27,16 @@ def parse_arguments():
     parser.add_argument('--early_stopping', type=int, help='Early stopping patience')
     parser.add_argument('--pred_threshold', type=float, help='Threshold for classification')
     return parser.parse_args()
+
+def plot_feature_heatmap(features, feature_dim, keywords, dataset, filename='feature_input'):
+    plt.figure(figsize=(6, 10))
+    plt.imshow(features.T.cpu().numpy(), cmap='viridis', aspect='auto')
+    plt.title(f'Feature Input Heatmap')
+    plt.xticks([])
+    plt.yticks(ticks=range(feature_dim), labels=keywords, fontsize=8)
+    plt.colorbar(label='Anomaly Weight')
+    plt.tight_layout()
+    plt.savefig(f'{dataset}/{filename}.png')
 
 class Deduction:
     def __init__(self, dataset, root, learning_rate, decay, keywords, used_frame_paths, feature_dim):
@@ -83,6 +95,8 @@ class Deduction:
                 print('Generating frame description:', frame_path)
                 input = setup_input(frame_path)
                 frame_description = generate_output(input)
+                del input
+                torch.cuda.empty_cache()
                 with open(f'{self.dataset}/{mode}_descriptions.txt', 'a') as f:
                     f.write(f'{frame_description}\n')
     
@@ -95,6 +109,9 @@ class Deduction:
         self.VADSK = VADSK(feature_dim=self.feature_dim).to(self.device)
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=self.cls_weight)
         self.optimizer = optim.AdamW(self.VADSK.parameters(), lr=self.learning_rate, weight_decay=self.decay)
+        # self.VADSK = VADSK_AUTOENCODER(feature_dim=self.feature_dim).to(self.device)
+        # self.optimizer = optim.Adam(self.VADSK.parameters())
+        # self.criterion = nn.MSELoss()
 
     def frame_descriptions_to_features(self, frame_descriptions):
         feature_input = torch.zeros((len(frame_descriptions), self.feature_dim), dtype=torch.float32)
@@ -110,11 +127,12 @@ if __name__ == "__main__":
     with open(f"{args.dataset}/config.json", 'r') as f:
         config = json.load(f)
 
-    with open(f'{args.dataset}/keywords.json', 'r') as f:
-        keyword_data = json.load(f)
-
+    args.root = config['root']
     for key, value in config['deduction'].items():
         setattr(args, key, value)
+
+    with open(f'{args.dataset}/keywords.json', 'r') as f:
+        keyword_data = json.load(f)
 
     keywords = keyword_data['keywords']
     used_frame_paths = keyword_data['frame_paths']
@@ -131,12 +149,23 @@ if __name__ == "__main__":
     )
 
     labels_path = f'{args.dataset}/labels.csv'
+    # vadsk_path = f'{args.dataset}/vadsk_autoencoder.pth'
     vadsk_path = f'{args.dataset}/vadsk.pth'
 
-    df = pd.read_csv(labels_path, header=None, names=['frame_path', 'label'])
+    df = pd.read_csv(labels_path, dtype={'frame_path': str, 'label': int})
     df = df[~df['frame_path'].isin(deductor.used_frame_paths) & df['frame_path'].str.contains('test')]
     frame_paths = df.iloc[:, 0].tolist()
     labels = df.iloc[:, 1].astype(int).tolist()
+
+    # train_df = pd.read_csv(labels_path, dtype={'frame_path': str, 'label': int)
+    # train_df = train_df[~train_df['frame_path'].isin(deductor.used_frame_paths) & train_df['frame_path'].str.contains('train')]
+    # train_paths = train_df.iloc[:, 0].tolist()
+    # train_labels = train_df.iloc[:, 1].astype(int).tolist()
+
+    # test_df = pd.read_csv(labels_path, dtype={'frame_path': str, 'label': int)
+    # test_df = test_df[~test_df['frame_path'].isin(deductor.used_frame_paths) & test_df['frame_path'].str.contains('test')]
+    # test_paths = test_df.iloc[:, 0].tolist()
+    # test_labels = test_df.iloc[:, 1].astype(int).tolist()
 
     train_paths, test_paths, train_labels, test_labels = train_test_split(
         frame_paths, labels, test_size=0.2, random_state=args.seed
@@ -144,10 +173,12 @@ if __name__ == "__main__":
 
     if args.train:
         description_path = f'{args.dataset}/train_descriptions.txt'
+        # description_path = f'{args.dataset}/normal_descriptions.txt'
         if not os.path.exists(description_path):
             deductor.init_vlm()
             deductor.init_vlm_prompt()
             deductor.generate_frame_descriptions(train_paths, mode='train')
+            # deductor.generate_frame_descriptions(train_paths, mode='normal')
         
         with open(description_path, 'r') as f:
             train_descriptions = [line.strip() for line in f.readlines()]
@@ -164,14 +195,12 @@ if __name__ == "__main__":
 
             train_descriptions_fold = [train_descriptions[i] for i in train_index]
             train_labels_fold = [train_labels[i] for i in train_index]
-            train_paths_fold = [train_paths[i] for i in train_index]
             
             val_descriptions_fold = [train_descriptions[i] for i in val_index]
             val_labels_fold = [train_labels[i] for i in val_index]
-            val_paths_fold = [train_paths[i] for i in val_index]
 
-            train_batches = len(train_paths_fold) // args.batch_size
-            val_batches = len(val_paths_fold) // args.batch_size
+            train_batches = len(train_descriptions_fold) // args.batch_size
+            val_batches = len(val_descriptions_fold) // args.batch_size
 
             deductor.init_classifier()
 
@@ -184,13 +213,13 @@ if __name__ == "__main__":
 
                     batch_descriptions = train_descriptions_fold[i * args.batch_size:(i + 1) * args.batch_size]
                     batch_labels = train_labels_fold[i * args.batch_size:(i + 1) * args.batch_size]
-                    batch_images = train_paths_fold[i * args.batch_size:(i + 1) * args.batch_size]
 
                     labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0).to(deductor.device)
-                    feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
+                    feature_input = deductor.frame_descriptions_to_features(batch_descriptions).to(deductor.device)
                     outputs = deductor.VADSK(feature_input.to(deductor.device))
 
                     loss = deductor.criterion(outputs, labels_tensor)
+                    # loss = deductor.criterion(outputs, feature_input)
                     train_loss += loss.item()
                     
                     loss.backward()
@@ -203,15 +232,16 @@ if __name__ == "__main__":
                 for i in range(val_batches):
                     batch_descriptions = val_descriptions_fold[i * args.batch_size:(i + 1) * args.batch_size]
                     batch_labels = val_labels_fold[i * args.batch_size:(i + 1) * args.batch_size]
-                    batch_images = val_paths_fold[i * args.batch_size:(i + 1) * args.batch_size]
 
                     labels_tensor = torch.tensor(batch_labels, dtype=torch.float32).unsqueeze(0).to(deductor.device)
-                    feature_input = deductor.frame_descriptions_to_features(batch_descriptions)
+                    feature_input = deductor.frame_descriptions_to_features(batch_descriptions).to(deductor.device)
 
                     with torch.no_grad():
                         outputs = deductor.VADSK(feature_input.to(deductor.device))
 
                     loss = deductor.criterion(outputs, labels_tensor)
+                    # loss = deductor.criterion(outputs, feature_input)
+                    
                     val_loss += loss.item()
 
                 val_loss /= val_batches
@@ -240,35 +270,55 @@ if __name__ == "__main__":
         torch.save(best_model_state, vadsk_path)
 
     if args.test:
-        description_path = f'{args.dataset}/test_descriptions.txt'
-        if not os.path.exists(description_path):
-            deductor.init_vlm()
-            deductor.init_vlm_prompt()
-            deductor.generate_frame_descriptions(test_paths, mode='test')
-        
-        with open(description_path, 'r') as f:
-            test_descriptions = [line.strip() for line in f.readlines()]
-
-        # TODO: also implement independent frame description generation for test set
-
-        feature_input = deductor.frame_descriptions_to_features(test_descriptions)
-        if args.interpret:
-            plt.figure(figsize=(15, 15))
-            seaborn.heatmap(feature_input.T.cpu().numpy(), cmap='viridis', cbar=True)
-            plt.title('Feature Input Heatmap')
-            plt.xlabel('Frame')
-            plt.ylabel('Feature')
-            plt.yticks(ticks=range(feature_dim), labels=deductor.keywords, rotation=0)
-            plt.savefig(f'benchmarks/{args.dataset}/feature_input.png')
-
-
         deductor.VADSK = VADSK(feature_dim=feature_dim).to(deductor.device)
+        # deductor.VADSK = VADSK_AUTOENCODER(feature_dim=feature_dim).to(deductor.device)
         deductor.VADSK.load_state_dict(torch.load(vadsk_path, weights_only=True))
         deductor.VADSK.eval()
 
+        if args.live:
+            deductor.init_vlm()
+            deductor.init_vlm_prompt()
+
+            for test_path, test_label in zip(test_paths, test_labels):
+                filename = ''.join(test_path.replace('/', '_').split('.')[0])
+                test_description = deductor.generate_frame_descriptions([test_path], mode='test')
+                feature_input = deductor.frame_descriptions_to_features([test_description])
+                if args.interpret: 
+                    plot_feature_heatmap(
+                        feature_input, 
+                        feature_dim, 
+                        deductor.keywords, 
+                        args.dataset, 
+                        filename
+                    )
+
+                with torch.no_grad():
+                    output = deductor.VADSK(feature_input.to(deductor.device))
+                prob = torch.sigmoid(output).item()
+                print(round(prob, 4), test_label)
+                breakpoint()
+                
+        else:
+            description_path = f'{args.dataset}/test_descriptions.txt'
+            if not os.path.exists(description_path):
+                deductor.init_vlm()
+                deductor.init_vlm_prompt()
+                deductor.generate_frame_descriptions(test_paths, mode='test')
+            
+            with open(description_path, 'r') as f:
+                test_descriptions = [line.strip() for line in f.readlines()]
+
+            feature_input = deductor.frame_descriptions_to_features(test_descriptions)
+            if args.interpret: plot_feature_heatmap(feature_input, feature_dim, deductor.keywords, args.dataset)
+
         with torch.no_grad():
             outputs = deductor.VADSK(feature_input.to(deductor.device))
-            
+        
+        # # args.pred_threshold = 0.00005 # for ped2
+        # reconstruction_loss = nn.MSELoss(reduction='none')
+        # losses = reconstruction_loss(outputs, feature_input.to(deductor.device)).mean(dim=1)
+        # predictions = (losses >= args.pred_threshold).int().tolist()
+
         probs = torch.sigmoid(outputs)
         predictions = (probs >= args.pred_threshold).squeeze(0).tolist()
 
@@ -281,3 +331,7 @@ if __name__ == "__main__":
         print(f'Precision: {precision:.4f}')
         print(f'Recall: {recall:.4f}')
         print(f'ROC AUC: {roc_auc:.4f}')
+
+        ## TODO: avenue normal (new) dataset is being generated for one-class classification
+        ## TODO: try training the one-class autoencoder and then testing on the original test dataset
+        ## TODO: if it performs well, generate the normal dataset for SHTech as well

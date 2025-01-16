@@ -1,3 +1,3 @@
-__pycache__/
-wordnet/
+src/__pycache__/
 *.pth
+*.txt

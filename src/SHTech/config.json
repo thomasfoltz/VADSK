@@ -1,19 +1,18 @@
 {
+    "root": "/data/tjf5667/datasets/",
     "induction": {
-        "seed": 42,
         "sample_size": 20,
         "keyword_limit": 200,
         "n_value": 1,
-        "df_threshold": 0.0
+        "df_threshold": 0.05
     },
     "deduction": {
-        "seed": 42,
-        "batch_size": 200,
-        "epochs": 10,
+        "batch_size": 2000,
+        "epochs": 20,
         "k_folds": 5,
         "learning_rate": 0.001,
         "decay": 0.001,
-        "early_stopping": 3,
-        "pred_threshold": 0.6
+        "early_stopping": 2,
+        "pred_threshold": 0.5
     }
 }

@@ -9,8 +9,8 @@ from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndB
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='ped2', choices=['SHTech', 'avenue', 'ped2'])
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     parser.add_argument('--root', type=str, help='Root directory for datasets')
-    parser.add_argument('--seed', type=int, help='Random seed for reproducibility')
     parser.add_argument('--sample_size', type=int, help='Number of normal and anomaly samples to process')
     parser.add_argument('--keyword_limit', type=int, help='Maximum number of keywords for TF-IDF')
     parser.add_argument('--n_value', type=int, help='N-gram range for TF-IDF')
@@ -102,6 +102,8 @@ class Induction:
             input = setup_input(frame_path)
             frame_description = generate_output(input)
             frame_descriptions += f'{frame_description} '
+            del input
+            torch.cuda.empty_cache()
 
         return frame_descriptions
     
@@ -115,8 +117,10 @@ if __name__ == "__main__":
 
     with open(f"{args.dataset}/config.json", 'r') as f:
         config = json.load(f)
-        for key, value in config['induction'].items():
-            setattr(args, key, value)
+
+    args.root = config['root']
+    for key, value in config['induction'].items():
+        setattr(args, key, value)
 
     inductor = Induction(
         args.dataset, 

@@ -7,12 +7,9 @@ Thomas Foltz, Huijuan Xu
 
 ![image](https://github.com/user-attachments/assets/77c8f19e-bff2-4171-a5a9-694f24f3f4ec)
 
-
-
-
 ## Overview
 
-This project introduces VADSK, a novel approach for video anomaly detection that leverages video captioning, keyword extraction, and a classification network to efficiently identify anomalous events in video data.
+This project introduces VADSK, a novel approach for video anomaly detection that leverages video captioning, keyword extraction, and a classification network to efficiently identify anomalous events in video data. See the [source code](src/README.md) for instructions on how to run the codebase.
 
 ## Key Features
 
@@ -30,34 +27,13 @@ VADSK draws inspiration from AnomalyRuler and utilizes the TF-IDF library for it
 ## Results
 | Benchmark | Accuracy | Precision | Recall | ROC AUC |
 |---|---|---|---|---|
-| UCSD-Ped2 | 0.8442 | 0.9928 | 0.8214 | 0.8946 |
-| CUHK Avenue | 0.7540 | 0.5635 | 0.6404 | 0.7164 |
-| Shanghai Tech | 0.7712 | 0.7742 | 0.6565 | 0.7567 |
+| UCSD-Ped2 | 0.8367 | 0.9786 | 0.8228 | 0.8653 |
+| CUHK Avenue | 0.7596 | 0.519 | 0.7049 | 0.7415 |
+| Shanghai Tech | 0.7582 | 0.7502 | 0.6542 | 0.7453 |
 
-## Dependencies
-
-This project requires Python>=3.12 and the packages listed in `requirements.txt`.
-
-### Creating a Virtual Environment (Recommended)
-
-```bash
-conda create -n vadsk python=3.12
-conda activate vadsk
-pip install -r requirements.txt
-```
-
-### Running VADSK
-
-```bash
-# Generate keywords for the dataset (defaults to ped2)
-python induct.py --root <path_to_datasets> --dataset <ped2|avenue|SHTech>
-
-# Generate frame descriptions for the selected test dataset (defaults to ped2)
-python deduct.py --root <path_to_datasets> --dataset <ped2|avenue|SHTech>
-
-# Add train and test flags for model training and final results (can be ran independently from frame description generation)
-python deduct.py --train --test
-
-# Add interpret flag during test time to view the feature input heatmap
-python deduct.py --test --interpret
-```
+## Memory Usage
+| Component | Total Memory Usage (MB) | Peak Memory Usage (MB) |
+|---|---|---|
+| Llama-3.2-11B-Vision-Instruct (induction/deduction) | 7293.34 | 8094.52 |
+| VADSK (training) | 17.22 | 18.74 |
+| VADSK (inference) | 0.22 | 0.45 |
