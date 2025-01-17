@@ -109,9 +109,6 @@ class Deduction:
         self.VADSK = VADSK(feature_dim=self.feature_dim).to(self.device)
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=self.cls_weight)
         self.optimizer = optim.AdamW(self.VADSK.parameters(), lr=self.learning_rate, weight_decay=self.decay)
-        # self.VADSK = VADSK_AUTOENCODER(feature_dim=self.feature_dim).to(self.device)
-        # self.optimizer = optim.Adam(self.VADSK.parameters())
-        # self.criterion = nn.MSELoss()
 
     def frame_descriptions_to_features(self, frame_descriptions):
         feature_input = torch.zeros((len(frame_descriptions), self.feature_dim), dtype=torch.float32)
@@ -148,24 +145,10 @@ if __name__ == "__main__":
         feature_dim
     )
 
-    labels_path = f'{args.dataset}/labels.csv'
-    # vadsk_path = f'{args.dataset}/vadsk_autoencoder.pth'
-    vadsk_path = f'{args.dataset}/vadsk.pth'
-
-    df = pd.read_csv(labels_path, dtype={'frame_path': str, 'label': int})
+    df = pd.read_csv(f'{args.dataset}/labels.csv', dtype={'frame_path': str, 'label': int})
     df = df[~df['frame_path'].isin(deductor.used_frame_paths) & df['frame_path'].str.contains('test')]
     frame_paths = df.iloc[:, 0].tolist()
     labels = df.iloc[:, 1].astype(int).tolist()
-
-    # train_df = pd.read_csv(labels_path, dtype={'frame_path': str, 'label': int)
-    # train_df = train_df[~train_df['frame_path'].isin(deductor.used_frame_paths) & train_df['frame_path'].str.contains('train')]
-    # train_paths = train_df.iloc[:, 0].tolist()
-    # train_labels = train_df.iloc[:, 1].astype(int).tolist()
-
-    # test_df = pd.read_csv(labels_path, dtype={'frame_path': str, 'label': int)
-    # test_df = test_df[~test_df['frame_path'].isin(deductor.used_frame_paths) & test_df['frame_path'].str.contains('test')]
-    # test_paths = test_df.iloc[:, 0].tolist()
-    # test_labels = test_df.iloc[:, 1].astype(int).tolist()
 
     train_paths, test_paths, train_labels, test_labels = train_test_split(
         frame_paths, labels, test_size=0.2, random_state=args.seed
@@ -173,12 +156,10 @@ if __name__ == "__main__":
 
     if args.train:
         description_path = f'{args.dataset}/train_descriptions.txt'
-        # description_path = f'{args.dataset}/normal_descriptions.txt'
         if not os.path.exists(description_path):
             deductor.init_vlm()
             deductor.init_vlm_prompt()
             deductor.generate_frame_descriptions(train_paths, mode='train')
-            # deductor.generate_frame_descriptions(train_paths, mode='normal')
         
         with open(description_path, 'r') as f:
             train_descriptions = [line.strip() for line in f.readlines()]
@@ -203,7 +184,7 @@ if __name__ == "__main__":
             val_batches = len(val_descriptions_fold) // args.batch_size
 
             deductor.init_classifier()
-
+            
             for epoch in range(args.epochs):
                 train_loss, val_loss = 0.0, 0.0
 
@@ -219,7 +200,6 @@ if __name__ == "__main__":
                     outputs = deductor.VADSK(feature_input.to(deductor.device))
 
                     loss = deductor.criterion(outputs, labels_tensor)
-                    # loss = deductor.criterion(outputs, feature_input)
                     train_loss += loss.item()
                     
                     loss.backward()
@@ -240,8 +220,6 @@ if __name__ == "__main__":
                         outputs = deductor.VADSK(feature_input.to(deductor.device))
 
                     loss = deductor.criterion(outputs, labels_tensor)
-                    # loss = deductor.criterion(outputs, feature_input)
-                    
                     val_loss += loss.item()
 
                 val_loss /= val_batches
@@ -267,12 +245,11 @@ if __name__ == "__main__":
         print(f'Average Train Loss: {average_train_loss:.4f}')
         print(f'Average Val Loss: {average_val_loss:.4f}')
 
-        torch.save(best_model_state, vadsk_path)
+        torch.save(best_model_state, f'{args.dataset}/vadsk.pth')
 
     if args.test:
         deductor.VADSK = VADSK(feature_dim=feature_dim).to(deductor.device)
-        # deductor.VADSK = VADSK_AUTOENCODER(feature_dim=feature_dim).to(deductor.device)
-        deductor.VADSK.load_state_dict(torch.load(vadsk_path, weights_only=True))
+        deductor.VADSK.load_state_dict(torch.load(f'{args.dataset}/vadsk.pth', weights_only=True))
         deductor.VADSK.eval()
 
         if args.live:
@@ -313,11 +290,6 @@ if __name__ == "__main__":
 
         with torch.no_grad():
             outputs = deductor.VADSK(feature_input.to(deductor.device))
-        
-        # # args.pred_threshold = 0.00005 # for ped2
-        # reconstruction_loss = nn.MSELoss(reduction='none')
-        # losses = reconstruction_loss(outputs, feature_input.to(deductor.device)).mean(dim=1)
-        # predictions = (losses >= args.pred_threshold).int().tolist()
 
         probs = torch.sigmoid(outputs)
         predictions = (probs >= args.pred_threshold).squeeze(0).tolist()
@@ -331,7 +303,3 @@ if __name__ == "__main__":
         print(f'Precision: {precision:.4f}')
         print(f'Recall: {recall:.4f}')
         print(f'ROC AUC: {roc_auc:.4f}')
-
-        ## TODO: avenue normal (new) dataset is being generated for one-class classification
-        ## TODO: try training the one-class autoencoder and then testing on the original test dataset
-        ## TODO: if it performs well, generate the normal dataset for SHTech as well
