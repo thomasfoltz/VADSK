@@ -25,11 +25,11 @@ VADSK draws inspiration from AnomalyRuler and utilizes the TF-IDF library for it
 *   **[TF-IDF](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html):** Short for term frequency-inverse document frequency, is a measure of the importance of a word to a document in a corpus, considering that some words appear more frequently than others.
 
 ## Results
-| Benchmark | Accuracy | Precision | Recall | ROC AUC |
-|---|---|---|---|---|
-| UCSD-Ped2 | 0.8367 | 0.9786 | 0.8228 | 0.8653 |
-| CUHK Avenue | 0.7596 | 0.519 | 0.7049 | 0.7415 |
-| Shanghai Tech | 0.7582 | 0.7502 | 0.6542 | 0.7453 |
+| Benchmark | Accuracy | Precision | Recall | ROC AUC | F1 Score |
+|---|---|---|---|---|---|
+| UCSD-Ped2 | 0.8367 | 0.9786 | 0.8228 | 0.8653 | 0.8940
+| CUHK Avenue | 0.7596 | 0.519 | 0.7049 | 0.7415 | 0.5978
+| Shanghai Tech | 0.7582 | 0.7502 | 0.6542 | 0.7453 | 0.6968
 
 ## Memory Usage
 | Component | Total Memory Usage (MB) | Peak Memory Usage (MB) |
