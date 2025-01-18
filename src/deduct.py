@@ -1,11 +1,11 @@
-import argparse, json, os, seaborn, torch
+import argparse, json, os, torch
 import matplotlib.pyplot as plt
 import torch.optim as optim
 import torch.nn as nn
 import pandas as pd
 
 from PIL import Image
-from model import VADSK, VADSK_AUTOENCODER
+from model import VADSK
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
 from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig

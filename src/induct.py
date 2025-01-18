@@ -138,7 +138,11 @@ if __name__ == "__main__":
     tfidf_matrix, keywords = tfidf(corpus, args.keyword_limit, args.n_value, args.df_threshold)
     weights = tfidf_normalized_diff(tfidf_matrix)
 
-    valid_keywords, valid_weights = zip(*[(keyword, weight) for keyword, weight in zip(keywords, weights) if keyword.isalpha()])
+    valid_keywords, valid_weights = zip(*[
+        (keyword, weight) 
+        for keyword, weight in zip(keywords, weights) 
+        if all(word.isalpha() for word in keyword.split())
+    ])
 
     keyword_data = {
         "frame_paths": normal_frame_paths + anomaly_frame_paths,

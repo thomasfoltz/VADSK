@@ -6,7 +6,6 @@ nltk>=3.9.1
 numpy>=1.26.4
 pandas>=2.2.3
 scikit-learn>=1.5.2
-seaborn
 torch>=2.5.0
 torchvision>=0.20.0
 transformers>=4.46.0
