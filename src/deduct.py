@@ -1,4 +1,4 @@
-import argparse, json, os, torch
+import argparse, json, os, time, torch
 import matplotlib.pyplot as plt
 import torch.optim as optim
 import torch.nn as nn
@@ -256,11 +256,18 @@ if __name__ == "__main__":
             deductor.init_vlm()
             deductor.init_vlm_prompt()
 
+            total_time = 0
+            num_iterations = len(test_paths)
+            predictions = []
+
             for test_path, test_label in zip(test_paths, test_labels):
-                filename = ''.join(test_path.replace('/', '_').split('.')[0])
+                start_time = time.time()
+                
                 test_description = deductor.generate_frame_descriptions([test_path], mode='test')
                 feature_input = deductor.frame_descriptions_to_features([test_description])
-                if args.interpret: 
+                
+                if args.interpret:
+                    filename = ''.join(test_path.replace('/', '_').split('.')[0])
                     plot_feature_heatmap(
                         feature_input, 
                         feature_dim, 
@@ -271,9 +278,20 @@ if __name__ == "__main__":
 
                 with torch.no_grad():
                     output = deductor.VADSK(feature_input.to(deductor.device))
+                    
                 prob = torch.sigmoid(output).item()
-                print(round(prob, 4), test_label)
-                breakpoint()
+                rounded_prob = round(prob, 4)
+                prediction = 1 if prob >= args.pred_threshold else 0
+                predictions.append(prediction)
+                print(f'Predicted Probability: {rounded_prob}, Ground Truth Label: {test_label}')
+                
+                end_time = time.time()
+                iteration_time = end_time - start_time
+                print(f'Iteration time: {iteration_time:.4f} seconds')
+                total_time += iteration_time
+
+            average_time = total_time / num_iterations
+            print(f'Average iteration time: {average_time:.4f} seconds')
                 
         else:
             description_path = f'{args.dataset}/test_descriptions.txt'
@@ -286,13 +304,19 @@ if __name__ == "__main__":
                 test_descriptions = [line.strip() for line in f.readlines()]
 
             feature_input = deductor.frame_descriptions_to_features(test_descriptions)
-            if args.interpret: plot_feature_heatmap(feature_input, feature_dim, deductor.keywords, args.dataset)
+            if args.interpret: 
+                plot_feature_heatmap(
+                    feature_input, 
+                    feature_dim, 
+                    deductor.keywords, 
+                    args.dataset
+                )
 
-        with torch.no_grad():
-            outputs = deductor.VADSK(feature_input.to(deductor.device))
+            with torch.no_grad():
+                outputs = deductor.VADSK(feature_input.to(deductor.device))
 
-        probs = torch.sigmoid(outputs)
-        predictions = (probs >= args.pred_threshold).squeeze(0).tolist()
+            probs = torch.sigmoid(outputs)
+            predictions = (probs >= args.pred_threshold).squeeze(0).tolist()
 
         accuracy = accuracy_score(test_labels, predictions)
         precision = precision_score(test_labels, predictions)
