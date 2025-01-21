@@ -28,7 +28,7 @@ VADSK draws inspiration from AnomalyRuler and utilizes the TF-IDF library for it
 | Benchmark | Accuracy | Precision | Recall | ROC AUC | F1 Score | Avg Inference (s) |
 |---|---|---|---|---|---|---|
 | UCSD-Ped2 | 0.8367 | 0.9786 | 0.8228 | 0.8653 | 0.8940 | 5.7692 |
-| CUHK Avenue | 0.7596 | 0.519 | 0.7049 | 0.7415 | 0.5978| TBD |
+| CUHK Avenue | 0.7596 | 0.519 | 0.7049 | 0.7415 | 0.5978| 5.3815 |
 | SHTech | 0.7651 | 0.7559 | 0.6682 | 0.7530 | 0.7093 | 5.1735 |
 
 ## CUDA Memory Usage
