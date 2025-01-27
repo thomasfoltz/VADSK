@@ -5,6 +5,7 @@ import pandas as pd
 from PIL import Image
 from sklearn.feature_extraction.text import TfidfVectorizer
 from transformers import AutoProcessor, MllamaForConditionalGeneration, BitsAndBytesConfig
+from transformers import AutoModel, AutoTokenizer
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -46,23 +47,31 @@ class Induction:
         self.seed = seed
 
     def init_vlm(self):
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16
-        )
-        self.vlm_model = MllamaForConditionalGeneration.from_pretrained(
-            'meta-llama/Llama-3.2-11B-Vision-Instruct',
+        # bnb_config = BitsAndBytesConfig(
+        #     load_in_4bit=True,
+        #     bnb_4bit_quant_type="nf4",
+        #     bnb_4bit_compute_dtype=torch.bfloat16
+        # )
+        # self.vlm_model = MllamaForConditionalGeneration.from_pretrained(
+        #     'meta-llama/Llama-3.2-11B-Vision-Instruct',
+        #     torch_dtype=torch.bfloat16,
+        #     low_cpu_mem_usage=True,
+        #     quantization_config=bnb_config,
+        # )
+        # self.processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
+        self.vlm_model = AutoModel.from_pretrained(
+            'openbmb/MiniCPM-V-2_6-int4',
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
-            quantization_config=bnb_config,
-        )
-        self.processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
+            trust_remote_code=True,
+        ).eval()
+        self.tokenizer = AutoTokenizer.from_pretrained('openbmb/MiniCPM-V-2_6-int4', trust_remote_code=True)
 
     def init_vlm_prompt(self):
-        message = [{"role": "system", "content": "You are a surveillance monitor for urban safety"},
-                    {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Describe the activities and objects present in this scene."}]}]
-        self.vlm_prompt = self.processor.apply_chat_template(message)
+        # message = [{"role": "system", "content": "You are a surveillance monitor for urban safety"},
+        #             {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Describe the activities and objects present in this scene."}]}]
+        # self.vlm_prompt = self.processor.apply_chat_template(message)
+        self.vlm_prompt = 'You are a surveillance monitor for urban safety. Describe the activities and objects present in this scene.'
 
     def init_frame_paths(self):
         np.random.seed(self.seed)
@@ -81,19 +90,25 @@ class Induction:
     def generate_frame_descriptions(self, frame_paths):
         def setup_input(frame_path):
             image = Image.open(f"{self.root}{frame_path}").convert('RGB')
-            input = self.processor(
-                image,
-                self.vlm_prompt,
-                add_special_tokens=False,
-                return_tensors="pt"
-            ).to('cuda')
+            # input = self.processor(
+            #     image,
+            #     self.vlm_prompt,
+            #     add_special_tokens=False,
+            #     return_tensors="pt"
+            # ).to('cuda')
+            input = [{'role': 'user', 'content': [image, self.vlm_prompt]}]
             return input
         
         def generate_output(input):
-            with torch.no_grad():
-                output = self.vlm_model.generate(**input, max_new_tokens=128)
-            decoded_output = self.processor.decode(output[0])
-            content = decoded_output.split('<|end_header_id|>')[3].strip('<|eot_id|>')
+            # with torch.no_grad():
+            #     output = self.vlm_model.generate(**input, max_new_tokens=128)
+            # decoded_output = self.processor.decode(output[0])
+            # content = decoded_output.split('<|end_header_id|>')[3].strip('<|eot_id|>')
+            content = self.vlm_model.chat(
+                image=None,
+                msgs=input,
+                tokenizer=self.tokenizer
+            )
             return ' '.join(content.replace('\n', ' ').split()).lower()
 
         frame_descriptions = ''
@@ -101,6 +116,8 @@ class Induction:
             print('Generating frame description:', frame_path)
             input = setup_input(frame_path)
             frame_description = generate_output(input)
+            print(frame_description)
+            breakpoint()
             frame_descriptions += f'{frame_description} '
             del input
             torch.cuda.empty_cache()
