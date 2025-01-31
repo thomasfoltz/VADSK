@@ -40,65 +40,108 @@ def plot_feature_heatmap(features, feature_dim, keywords, dataset, filename='fea
     plt.savefig(f'{dataset}/{filename}.png')
 
 class Deduction:
-    def __init__(self, dataset, root, learning_rate, decay, keywords, used_frame_paths, feature_dim):
+    """
+    This class is designed to facilitate the process of generating frame descriptions from video frames, 
+    encoding those frame descriptions into keyword weights, and setting up anomaly classification.
+
+    Attributes:
+        device (torch.device): The device to run the computations on (CPU or GPU).
+        dataset (str): The path to the dataset.
+        root (str): The root directory for the dataset.
+        model_type (str): The type of foundational model used for vision-language processing.
+        learning_rate (float): The learning rate for the classification optimizer.
+        decay (float): The weight decay for the classification optimizer.
+        keywords (dict): A dictionary of keywords and their associated weights.
+        used_frame_paths (list): A list of paths to the frames used previously in the induction set.
+        feature_dim (int): The dimension of the feature vectors.
+
+    Methods:
+        init_foundational_model(): Initializes the foundational model for vision-language processing.
+        generate_frame_descriptions(): Generates descriptions for the given frames.
+        calculate_cls_weight(): Calculates the loss weighting for adjusted for class imbalance.
+        init_classifier(): Initializes the classifier for video anomaly detection.
+        frame_descriptions_to_features(): Encodes the frame descriptions into weighted feature vectors.
+    """
+    def __init__(self, dataset, root, model_type, learning_rate, decay, keywords, used_frame_paths, feature_dim):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.dataset = dataset
         self.root = root
+        self.model_type = model_type
         self.learning_rate = learning_rate
         self.decay = decay
         self.keywords = keywords
         self.used_frame_paths = used_frame_paths
         self.feature_dim = feature_dim
 
-    def init_vlm(self):
-        # bnb_config = BitsAndBytesConfig(
-        #     load_in_4bit=True,
-        #     bnb_4bit_quant_type="nf4",
-        #     bnb_4bit_compute_dtype=torch.bfloat16
-        # )
-        # self.vlm_model = MllamaForConditionalGeneration.from_pretrained(
-        #     'meta-llama/Llama-3.2-11B-Vision-Instruct',
-        #     torch_dtype=torch.bfloat16,
-        #     low_cpu_mem_usage=True,
-        #     quantization_config=bnb_config,
-        # )
-        # self.processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
-        self.vlm_model = AutoModel.from_pretrained(
-            'openbmb/MiniCPM-V-2_6-int4',
-            torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-            trust_remote_code=True,
-        ).eval()
-        self.tokenizer = AutoTokenizer.from_pretrained('openbmb/MiniCPM-V-2_6-int4', trust_remote_code=True)
+    def init_foundational_model(self):
+        if args.model_type == "meta-llama/Llama-3.2-11B-Vision-Instruct":
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16
+            )
+            self.foundational_model = MllamaForConditionalGeneration.from_pretrained(
+                'meta-llama/Llama-3.2-11B-Vision-Instruct',
+                torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True,
+                quantization_config=bnb_config,
+            )
 
-    def init_vlm_prompt(self):
-        # message = [{"role": "system", "content": "You are a surveillance monitor for urban safety"},
-        #             {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Describe the activities and objects present in this scene."}]}]
-        # self.vlm_prompt = self.processor.apply_chat_template(message, add_generation_prompt=True)
-        self.vlm_prompt = 'You are a surveillance monitor for urban safety. Describe the activities and objects present in this scene.'
+            self.processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
+            message = [{"role": "system", "content": "You are a surveillance monitor for urban safety"},
+                    {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Describe the activities and objects present in this scene."}]}]
+            self.foundational_model_prompt = self.processor.apply_chat_template(message, add_generation_prompt=True)
+
+        elif args.model_type == "openbmb/MiniCPM-V-2_6-int4":
+            self.foundational_model = AutoModel.from_pretrained(
+                'openbmb/MiniCPM-V-2_6-int4',
+                torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True,
+                trust_remote_code=True,
+            ).eval()
+
+            self.tokenizer = AutoTokenizer.from_pretrained('openbmb/MiniCPM-V-2_6-int4', trust_remote_code=True)
+            self.foundational_model_prompt = 'You are a surveillance monitor for urban safety. Describe the activities and objects present in this scene.'
+        
+        else:
+            raise ValueError('Invalid model type')
 
     def generate_frame_descriptions(self, frame_paths, mode='train'):
         def setup_input(frame_path):
             image = Image.open(f"{self.root}{frame_path}").convert('RGB')
-            # input = self.processor(
-            #     image,
-            #     self.vlm_prompt,
-            #     add_special_tokens=False,
-            #     return_tensors="pt"
-            # ).to('cuda')
-            input = [{'role': 'user', 'content': [image, self.vlm_prompt]}]
+            if args.model_type == "meta-llama/Llama-3.2-11B-Vision-Instruct":
+                input = self.processor(
+                    image,
+                    self.foundational_model_prompt,
+                    add_special_tokens=False,
+                    return_tensors="pt"
+                ).to('cuda')
+
+            elif args.model_type == "openbmb/MiniCPM-V-2_6-int4":
+                input = [{'role': 'user', 'content': [image, self.foundational_model_prompt]}]
+
+            else:
+                raise ValueError('Invalid model type')
+            
             return input
         
         def generate_output(input):
-            # with torch.no_grad():
-            #     output = self.vlm_model.generate(**input, max_new_tokens=128)
-            # decoded_output = self.processor.decode(output[0])
-            # content = decoded_output.split('<|end_header_id|>')[3].strip('<|eot_id|>')
-            content = self.vlm_model.chat(
-                image=None,
-                msgs=input,
-                tokenizer=self.tokenizer
-            )
+            if args.model_type == "meta-llama/Llama-3.2-11B-Vision-Instruct":
+                with torch.no_grad():
+                    output = self.foundational_model.generate(**input, max_new_tokens=128)
+                decoded_output = self.processor.decode(output[0])
+                content = decoded_output.split('<|end_header_id|>')[3].strip('<|eot_id|>')
+
+            elif args.model_type == "openbmb/MiniCPM-V-2_6-int4":
+                content = self.foundational_model.chat(
+                    image=None,
+                    msgs=input,
+                    tokenizer=self.tokenizer
+                )
+                
+            else:
+                raise ValueError('Invalid model type')
+            
             return ' '.join(content.replace('\n', ' ').split()).lower()
         
         if len(frame_paths) == 1:
@@ -140,6 +183,7 @@ if __name__ == "__main__":
         config = json.load(f)
 
     args.root = config['root']
+    args.model_type = config['model_type']
     for key, value in config['deduction'].items():
         setattr(args, key, value)
 
@@ -152,7 +196,8 @@ if __name__ == "__main__":
 
     deductor = Deduction(
         args.dataset, 
-        args.root, 
+        args.root,
+        args.model_type, 
         args.learning_rate, 
         args.decay,
         keywords, 
@@ -172,8 +217,7 @@ if __name__ == "__main__":
     if args.train:
         description_path = f'{args.dataset}/train_descriptions.txt'
         if not os.path.exists(description_path):
-            deductor.init_vlm()
-            deductor.init_vlm_prompt()
+            deductor.init_foundational_model()
             deductor.generate_frame_descriptions(train_paths, mode='train')
         
         with open(description_path, 'r') as f:
@@ -268,8 +312,7 @@ if __name__ == "__main__":
         deductor.VADSK.eval()
 
         if args.live:
-            deductor.init_vlm()
-            deductor.init_vlm_prompt()
+            deductor.init_foundational_model()
 
             total_time = 0
             num_iterations = len(test_paths)
@@ -305,16 +348,13 @@ if __name__ == "__main__":
                 print(f'Iteration time: {iteration_time:.4f} seconds')
                 total_time += iteration_time
 
-                breakpoint()
-
             average_time = total_time / num_iterations
             print(f'Average iteration time: {average_time:.4f} seconds')
                 
         else:
             description_path = f'{args.dataset}/test_descriptions.txt'
             if not os.path.exists(description_path):
-                deductor.init_vlm()
-                deductor.init_vlm_prompt()
+                deductor.init_foundational_model()
                 deductor.generate_frame_descriptions(test_paths, mode='test')
             
             with open(description_path, 'r') as f:

@@ -40,38 +40,62 @@ def tfidf_normalized_diff(tfidf_matrix):
     return np.round((tfidf_diff - tfidf_min) / (tf_idf_max - tfidf_min), 4)
 
 class Induction:
-    def __init__(self, dataset, root, sample_size, seed):
+    """
+    This class facilitates the process of generating frame descriptions from video frames, 
+    selecting frame paths for normal and anomaly samples, and generating the corpus necessary for the TF-IDF oepration.
+
+    Attributes:
+        dataset (str): The path to the dataset.
+        root (str): The root directory for the dataset.
+        model_type (str): The type of foundational model used for vision-language processing.
+        sample_size (int): The number of normal and anomaly samples to process.
+        seed (int): The random seed for reproducibility.
+
+    Methods:
+        init_foundational_model(): Initializes the foundational model for vision-language processing.
+        init_frame_paths(): Selects frame paths for normal and anomaly samples.
+        generate_frame_descriptions(frame_paths): Generates descriptions for the given frames.
+        generate_corpus(normal_frame_paths, anomaly_frame_paths): Generates a corpus of frame descriptions for normal and anomaly samples.
+    """
+    def __init__(self, dataset, root, model_type, sample_size, seed):
         self.dataset = dataset
         self.root = root
+        self.model_type = model_type
         self.sample_size = sample_size
         self.seed = seed
 
-    def init_vlm(self):
-        # bnb_config = BitsAndBytesConfig(
-        #     load_in_4bit=True,
-        #     bnb_4bit_quant_type="nf4",
-        #     bnb_4bit_compute_dtype=torch.bfloat16
-        # )
-        # self.vlm_model = MllamaForConditionalGeneration.from_pretrained(
-        #     'meta-llama/Llama-3.2-11B-Vision-Instruct',
-        #     torch_dtype=torch.bfloat16,
-        #     low_cpu_mem_usage=True,
-        #     quantization_config=bnb_config,
-        # )
-        # self.processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
-        self.vlm_model = AutoModel.from_pretrained(
-            'openbmb/MiniCPM-V-2_6-int4',
-            torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-            trust_remote_code=True,
-        ).eval()
-        self.tokenizer = AutoTokenizer.from_pretrained('openbmb/MiniCPM-V-2_6-int4', trust_remote_code=True)
+    def init_foundational_model(self):
+        if args.model_type == "meta-llama/Llama-3.2-11B-Vision-Instruct":
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16
+            )
+            self.foundational_model = MllamaForConditionalGeneration.from_pretrained(
+                'meta-llama/Llama-3.2-11B-Vision-Instruct',
+                torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True,
+                quantization_config=bnb_config,
+            )
 
-    def init_vlm_prompt(self):
-        # message = [{"role": "system", "content": "You are a surveillance monitor for urban safety"},
-        #             {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Describe the activities and objects present in this scene."}]}]
-        # self.vlm_prompt = self.processor.apply_chat_template(message)
-        self.vlm_prompt = 'You are a surveillance monitor for urban safety. Describe the activities and objects present in this scene.'
+            self.processor = AutoProcessor.from_pretrained('meta-llama/Llama-3.2-11B-Vision-Instruct')
+            message = [{"role": "system", "content": "You are a surveillance monitor for urban safety"},
+                    {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Describe the activities and objects present in this scene."}]}]
+            self.foundational_model_prompt = self.processor.apply_chat_template(message, add_generation_prompt=True)
+
+        elif args.model_type == "openbmb/MiniCPM-V-2_6-int4":
+            self.foundational_model = AutoModel.from_pretrained(
+                'openbmb/MiniCPM-V-2_6-int4',
+                torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True,
+                trust_remote_code=True,
+            ).eval()
+
+            self.tokenizer = AutoTokenizer.from_pretrained('openbmb/MiniCPM-V-2_6-int4', trust_remote_code=True)
+            self.foundational_model_prompt = 'You are a surveillance monitor for urban safety. Describe the activities and objects present in this scene.'
+        
+        else:
+            raise ValueError('Invalid model type')
 
     def init_frame_paths(self):
         np.random.seed(self.seed)
@@ -90,25 +114,39 @@ class Induction:
     def generate_frame_descriptions(self, frame_paths):
         def setup_input(frame_path):
             image = Image.open(f"{self.root}{frame_path}").convert('RGB')
-            # input = self.processor(
-            #     image,
-            #     self.vlm_prompt,
-            #     add_special_tokens=False,
-            #     return_tensors="pt"
-            # ).to('cuda')
-            input = [{'role': 'user', 'content': [image, self.vlm_prompt]}]
+            if args.model_type == "meta-llama/Llama-3.2-11B-Vision-Instruct":
+                input = self.processor(
+                    image,
+                    self.foundational_model_prompt,
+                    add_special_tokens=False,
+                    return_tensors="pt"
+                ).to('cuda')
+
+            elif args.model_type == "openbmb/MiniCPM-V-2_6-int4":
+                input = [{'role': 'user', 'content': [image, self.foundational_model_prompt]}]
+
+            else:
+                raise ValueError('Invalid model type')
+            
             return input
         
         def generate_output(input):
-            # with torch.no_grad():
-            #     output = self.vlm_model.generate(**input, max_new_tokens=128)
-            # decoded_output = self.processor.decode(output[0])
-            # content = decoded_output.split('<|end_header_id|>')[3].strip('<|eot_id|>')
-            content = self.vlm_model.chat(
-                image=None,
-                msgs=input,
-                tokenizer=self.tokenizer
-            )
+            if args.model_type == "meta-llama/Llama-3.2-11B-Vision-Instruct":
+                with torch.no_grad():
+                    output = self.foundational_model.generate(**input, max_new_tokens=128)
+                decoded_output = self.processor.decode(output[0])
+                content = decoded_output.split('<|end_header_id|>')[3].strip('<|eot_id|>')
+
+            elif args.model_type == "openbmb/MiniCPM-V-2_6-int4":
+                content = self.foundational_model.chat(
+                    image=None,
+                    msgs=input,
+                    tokenizer=self.tokenizer
+                )
+                
+            else:
+                raise ValueError('Invalid model type')
+            
             return ' '.join(content.replace('\n', ' ').split()).lower()
 
         frame_descriptions = ''
@@ -116,8 +154,6 @@ class Induction:
             print('Generating frame description:', frame_path)
             input = setup_input(frame_path)
             frame_description = generate_output(input)
-            print(frame_description)
-            breakpoint()
             frame_descriptions += f'{frame_description} '
             del input
             torch.cuda.empty_cache()
@@ -136,25 +172,26 @@ if __name__ == "__main__":
         config = json.load(f)
 
     args.root = config['root']
+    args.model_type = config['model_type']
     for key, value in config['induction'].items():
         setattr(args, key, value)
 
     inductor = Induction(
         args.dataset, 
-        args.root, 
+        args.root,
+        args.model_type,
         args.sample_size,
         args.seed
     )
 
-    inductor.init_vlm()
-    inductor.init_vlm_prompt()
-
+    inductor.init_foundational_model()
     normal_frame_paths, anomaly_frame_paths = inductor.init_frame_paths()
     corpus = inductor.generate_corpus(normal_frame_paths, anomaly_frame_paths)
 
     tfidf_matrix, keywords = tfidf(corpus, args.keyword_limit, args.n_value, args.df_threshold)
     weights = tfidf_normalized_diff(tfidf_matrix)
 
+    # Verifies that all keywords are actually words
     valid_keywords, valid_weights = zip(*[
         (keyword, weight) 
         for keyword, weight in zip(keywords, weights) 
