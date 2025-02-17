@@ -372,8 +372,7 @@ if __name__ == "__main__":
             with torch.no_grad():
                 outputs = deductor.VADSK(feature_input.to(deductor.device))
 
-            probs = torch.sigmoid(outputs)
-            predictions = (probs >= args.pred_threshold).squeeze(0).tolist()
+            predictions = (outputs >= args.pred_threshold).squeeze(0).tolist()
 
         accuracy = accuracy_score(test_labels, predictions)
         precision = precision_score(test_labels, predictions)
