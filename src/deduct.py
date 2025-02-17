@@ -336,12 +336,10 @@ if __name__ == "__main__":
 
                 with torch.no_grad():
                     output = deductor.VADSK(feature_input.to(deductor.device))
-                    
-                prob = torch.sigmoid(output).item()
-                rounded_prob = round(prob, 4)
-                prediction = 1 if prob >= args.pred_threshold else 0
+                
+                prediction = 1 if output >= args.pred_threshold else 0
                 predictions.append(prediction)
-                print(f'Predicted Probability: {rounded_prob}, Ground Truth Label: {test_label}')
+                print(f'Predicted Probability: {round(output, 4)}, Ground Truth Label: {test_label}')
                 
                 end_time = time.time()
                 iteration_time = end_time - start_time
