@@ -29,6 +29,14 @@ python deduct.py --test --dataset <ped2|avenue|SHTech>
 python deduct.py --test --interpret --live
 ```
 
+### Quick Setup
+
+For pre-generated frame descriptions, selected keywords, and pre-trained classification models, you can use the contents of the foundational model folders `llama3.2` or `minicpm` in the respective dataset folders:
+
+- [avenue](avenue)
+- [ped2](ped2)
+- [SHTech](SHTech)
+
 ### Example Inference
 
 #### Input frame
